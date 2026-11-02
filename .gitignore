@@ -1,0 +1,6 @@
+# Local development documents and archived research materials
+/doc/
+/.doc_tmp/
+
+# Also exclude the unprefixed archive directory name
+/doc_tmp/
