@@ -1,0 +1,104 @@
+{
+  "schema": "eds-execution-patches/v1",
+  "submodule": "execution-skills/solidworks-automation-skill",
+  "source_url": "https://github.com/TuKJet/solidworks-automation-skill.git",
+  "base_commit": "8a572ce6fa4d78e6ee75f03cc14547cf94830d8a",
+  "content_hash": "sha256-utf8-lf",
+  "patches": [
+    {
+      "file": "0001-extrusion-direction-and-failure.patch",
+      "sha256": "38a2500ebd8044dbbc20455866cb7c7bfca0d5097ca2631cd35d486b8b52fcae",
+      "purpose": "Correct cut direction and preserve partial-failure evidence.",
+      "files": {
+        "mcp-server/server.py": {
+          "before": "d6332c32e3a7a56db41176ef50b86c5d9fb3ef97e07dda6826ac90d106427d17",
+          "after": "a9cbe16897c1ddc9c9ef40d1e68ca73a3bc076fa59d0611e5109067f483d123d"
+        },
+        "references/part-modeling.md": {
+          "before": "9327c38016d4e90b4f13715a0fd53cdb709421c700dee2f211576d9a9e13db77",
+          "after": "3246777b89356333a6bb3717a99d2c9af339824c097c8c1ccae0575fe85d3db7"
+        },
+        "tests/test_mcp_sketch_and_extrude.py": {
+          "before": null,
+          "after": "fb72b6bd61c722417965b332fee83d0fe2cc8a4e8a8f0363971c462bb7511b44"
+        }
+      }
+    },
+    {
+      "file": "0002-document-close-and-step-import.patch",
+      "sha256": "6a5f7d0114745f57190ebedecf9d58845da2d337af8b6d8debd35bc7bdaba8e5",
+      "purpose": "Guard unsaved document closure and route STEP through explicit import.",
+      "files": {
+        "mcp-server/server.py": {
+          "before": "a9cbe16897c1ddc9c9ef40d1e68ca73a3bc076fa59d0611e5109067f483d123d",
+          "after": "3470c336e1894f525a86b4892c5d46c83df9a9c1b3085d2a3c42e431da41a302"
+        },
+        "tests/test_mcp_document_context.py": {
+          "before": "9cf4b1f7e516b042026cf4996bd3c20e892e34443c5b9dc807e3851d34eb893e",
+          "after": "a1584cc4e6b6d2f219fdc8adf684835f2e8e7e9320c3f60d856f562b304cef80"
+        }
+      }
+    },
+    {
+      "file": "0003-trimmed-edge-length.patch",
+      "sha256": "11a0bc162a0653eed9552d6b1ba077501f7b3a39af0e89d488029cf08a175280",
+      "purpose": "Measure trimmed curve length through the supported SolidWorks API.",
+      "files": {
+        "scripts/sw_edge_select.py": {
+          "before": "ce01a9d72a2adcd5cbace253de1374dd4a621dcfd9bb0e99376d7efcfffb2a2c",
+          "after": "7e519409dbf98a263741870645008e685af62de9399fee46e8be222e312b6f1b"
+        },
+        "tests/test_sw_edge_select.py": {
+          "before": "8c62c4a790537f9a299ada107b09c1676b5e1cc640fe64668109db978bb9ca83",
+          "after": "e13f7e2a5bcca384a0fc9d1a75966c682ab1e5f22305d805cde1792d416384dc"
+        }
+      }
+    },
+    {
+      "file": "0004-native-geometry-observables.patch",
+      "sha256": "1f99d436ad0832b88b796c8139e85c6414c2d95822706f650b337c15e57b576f",
+      "purpose": "Expose optional native planar-face geometry and preserve measured edge line classification for mapping verification.",
+      "files": {
+        "mcp-server/server.py": {
+          "before": "3470c336e1894f525a86b4892c5d46c83df9a9c1b3085d2a3c42e431da41a302",
+          "after": "41150ce3495eafce2bbb875b4576027e71566d5782592df7097218181f22ad71"
+        },
+        "scripts/sw_native_wire.cs": {
+          "before": "7bab67743d5ca282d6619343f1add0b8bc118ead83fe6d6c9dd5fd13d984b5e4",
+          "after": "e00f528a3b5224150728fc16d66a83a681f0984f9407d0207828d421d4fb9fc9"
+        },
+        "scripts/sw_native_wire.py": {
+          "before": "005b2c08eb1ba99ead2b915ae5248b241f9209413da588fa591c6827c2d55f82",
+          "after": "d8588a56d3c755d6aa529a0fe01c1e2454124b10d6a783536c18f02c42e9d60f"
+        },
+        "tests/test_native_wire_mcp.py": {
+          "before": "2b85d667ee139fd0186d2a07535762cdb513248d09c10a0a679c2328fd847f9c",
+          "after": "3a4deb804edc9394e24b6ba51c13ed6ea59cfc95b2396de120714fb077037c17"
+        },
+        "tests/manual_native_wire_2026.py": {
+          "before": "7e55ea5c68f0c8bb2ad98490864d890dfd833c45ac0aae6203bce9b51ef9dffc",
+          "after": "98cce9719bde6387c112afb68063b368a1319f41eaaa832701327c1138e17bdd"
+        },
+        "tests/test_mcp_edge_readback.py": {
+          "before": null,
+          "after": "bf946561c8840cccd56b7db7f4391cd4ca021d009ef8baf12e1c0e913a4e4bc2"
+        }
+      }
+    },
+    {
+      "file": "0005-document-state-and-safe-close.patch",
+      "sha256": "c31fc067fa5f220e5d45d551f26b4642d9b7053fd111bbd27951c6d4804935f9",
+      "purpose": "Inspect document save flags without mutation and reject closing saved-path documents with unsaved or unreadable state.",
+      "files": {
+        "mcp-server/server.py": {
+          "before": "41150ce3495eafce2bbb875b4576027e71566d5782592df7097218181f22ad71",
+          "after": "3b67ee1955e6d39b1488c7e698d86aab4cc5d14b846531c3339c86e795ec30e7"
+        },
+        "tests/test_mcp_document_context.py": {
+          "before": "a1584cc4e6b6d2f219fdc8adf684835f2e8e7e9320c3f60d856f562b304cef80",
+          "after": "9f3047a3faf2ab2d5b78da7b297852d4e100c75487d013f3efc8f5d75d9a4584"
+        }
+      }
+    }
+  ]
+}

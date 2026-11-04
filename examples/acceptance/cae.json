@@ -1,0 +1,13 @@
+{
+  "id": "cae-cantilever-models",
+  "status": "planned_not_executed",
+  "mode": "cae",
+  "goal": "From an existing analysis object, compare physical idealizations and distinguish numerical error from model inadequacy",
+  "baseline_SI": {"length_m": 0.1, "width_m": 0.02, "thickness_m": 0.01, "young_pa": 200000000000, "poisson": 0.3, "tip_load_N": 10},
+  "reference": "Linear small-deflection cantilever self-check: I=b*h^3/12; delta=F*L^3/(3*E*I), derived in docs/methods.md",
+  "required_observations": ["actual equations or physics interfaces", "dimensions and units", "material properties", "load distribution and support", "mesh/refinement sensitivity", "solver warnings and force balance", "tip displacement"],
+  "proposed_limits": {"relative_tip_deflection_error_in_reference_regime": 0.03, "relative_change_on_refinement": 0.02, "relative_force_imbalance": 0.01, "max_solves": 6},
+  "candidate_instruction": "Codex chooses model hypotheses from observed discrepancy; scalar parameter sweeps alone do not satisfy the candidate criterion",
+  "environment_gate": "Use a CAE-native fixture without requiring CAD editing; inspect compatibility, fix thresholds and solve-time budget before running. Analytical agreement only supports the stated regime",
+  "acceptance_ids": ["AC-02", "AC-03", "AC-05", "AC-07", "AC-09", "AC-11", "AC-12", "AC-13", "AC-14"]
+}

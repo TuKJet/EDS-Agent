@@ -1,0 +1,13 @@
+{
+  "id": "cad-expression-change",
+  "status": "planned_not_executed",
+  "mode": "cad",
+  "goal": "Create or take over a cantilever-shaped part and compare modelling expressions under a geometry change",
+  "baseline": {"length_mm": 100, "width_mm": 20, "thickness_mm": 10},
+  "required_observations": ["native model revision", "actual dimensions and units", "solid validity", "export readback", "feature/reference behaviour after thickness change"],
+  "reference": "Rectangular prism volume = length * width * thickness, independently computed; no CAE required",
+  "proposed_limits": {"dimension_error_mm": 0.01, "relative_volume_error": 0.001, "max_experiments": 4},
+  "candidate_instruction": "Codex proposes materially different modelling expressions and records predicted change behaviour; this task does not prescribe their identities",
+  "environment_gate": "Fix tolerances, native/export formats and wall-clock budget against actual CAD capabilities before execution",
+  "acceptance_ids": ["AC-01", "AC-02", "AC-03", "AC-04", "AC-08", "AC-09", "AC-10", "AC-12", "AC-14"]
+}

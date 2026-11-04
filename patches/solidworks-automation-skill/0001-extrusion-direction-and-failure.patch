@@ -1,0 +1,324 @@
+diff --git a/mcp-server/server.py b/mcp-server/server.py
+index 9a161d1a48c93a7c7094adb147bf5cbeafdc2ce2..8ce47e967c041e415f700568242b4f679f6d3e10 100644
+--- a/mcp-server/server.py
++++ b/mcp-server/server.py
+@@ -590,6 +590,14 @@ class SolidWorksSketchOnPlaneInput(BaseInput):
+     depth_mm: float = Field(..., gt=0.0, le=5000.0, description="Extrude depth, mm.")
+     midplane: bool = Field(default=False, description="Extrude symmetrically about the sketch plane.")
+     cut: bool = Field(default=False, description="Create a cut instead of a boss.")
++    direction: Optional[bool] = Field(
++        default=None,
++        description=(
++            "Optional SolidWorks Dir flag for one-sided boss/cut operations. True reverses the "
++            "operation's default sketch-normal direction; false keeps it. Omit to preserve "
++            "the underlying API default. Ignored for midplane."
++        ),
++    )
+     feature_name: Optional[str] = Field(default=None, max_length=120)
+     response_format: ResponseFormat = Field(default=ResponseFormat.JSON, description="Return format.")
+ 
+@@ -2205,8 +2213,6 @@ def solidworks_sketch_and_extrude(params: SolidWorksSketchOnPlaneInput) -> str:
+     """
+ 
+     def op():
+-        sw, model = _active_part_required()
+-
+         if params.shape == "circle" and params.radius_mm is None:
+             raise ValueError("shape='circle' requires radius_mm.")
+         if params.shape == "rectangle" and (params.width_mm is None or params.height_mm is None):
+@@ -2217,6 +2223,10 @@ def solidworks_sketch_and_extrude(params: SolidWorksSketchOnPlaneInput) -> str:
+             raise ValueError("shape='slot' requires slot_end_x_mm, slot_end_y_mm and radius_mm.")
+         if params.shape == "slot" and params.radius_mm is None:
+             raise ValueError("shape='slot' requires radius_mm (slot half-width).")
++        if params.cut and params.midplane:
++            raise ValueError("cut and midplane cannot both be true; midplane is supported for bosses only.")
++
++        sw, model = _active_part_required()
+ 
+         with sketch(model, params.plane_name) as sketch_ref:
+             if params.shape == "circle":
+@@ -2237,9 +2247,15 @@ def solidworks_sketch_and_extrude(params: SolidWorksSketchOnPlaneInput) -> str:
+         if params.midplane:
+             feature = extrude_midplane(model, sketch_ref, mm(params.depth_mm))
+         elif params.cut:
+-            feature = extrude_cut(model, sketch_ref, mm(params.depth_mm))
++            if params.direction is None:
++                feature = extrude_cut(model, sketch_ref, mm(params.depth_mm))
++            else:
++                feature = extrude_cut(model, sketch_ref, mm(params.depth_mm), direction=params.direction)
+         else:
+-            feature = extrude_boss(model, sketch_ref, mm(params.depth_mm))
++            if params.direction is None:
++                feature = extrude_boss(model, sketch_ref, mm(params.depth_mm))
++            else:
++                feature = extrude_boss(model, sketch_ref, mm(params.depth_mm), direction=params.direction)
+ 
+         if feature is None:
+             return {
+@@ -2254,6 +2270,69 @@ def solidworks_sketch_and_extrude(params: SolidWorksSketchOnPlaneInput) -> str:
+                 ),
+             }
+ 
++        if params.feature_name:
++            try:
++                feature.Name = params.feature_name
++            except Exception as exc:
++                try:
++                    actual_name = get_com_member(feature, "Name")
++                except Exception:
++                    actual_name = None
++                return {
++                    "status": "error",
++                    "shape": params.shape,
++                    "feature_created": True,
++                    "feature_name": actual_name,
++                    "requested_feature_name": params.feature_name,
++                    "sketch_name": str(sketch_ref),
++                    "depth_mm": params.depth_mm,
++                    "operation": "cut" if params.cut else ("midplane" if params.midplane else "boss"),
++                    "direction": params.direction if not params.midplane else None,
++                    "failure_stage": "feature_name_write",
++                    "retryable": False,
++                    "needs_inspection": True,
++                    "message": f"Unable to apply feature_name {params.feature_name!r}: {exc}",
++                    "suggestion": "Do not retry blindly; inspect the already-created feature and document before continuing.",
++                }
++            try:
++                actual_name = get_com_member(feature, "Name")
++            except Exception as exc:
++                return {
++                    "status": "error",
++                    "shape": params.shape,
++                    "feature_created": True,
++                    "feature_name": None,
++                    "requested_feature_name": params.feature_name,
++                    "sketch_name": str(sketch_ref),
++                    "depth_mm": params.depth_mm,
++                    "operation": "cut" if params.cut else ("midplane" if params.midplane else "boss"),
++                    "direction": params.direction if not params.midplane else None,
++                    "failure_stage": "feature_name_readback",
++                    "retryable": False,
++                    "needs_inspection": True,
++                    "message": f"Feature name readback failed: {exc}",
++                    "suggestion": "Do not retry blindly; inspect the already-created feature and document before continuing.",
++                }
++            if actual_name != params.feature_name:
++                return {
++                    "status": "error",
++                    "shape": params.shape,
++                    "feature_created": True,
++                    "feature_name": actual_name,
++                    "requested_feature_name": params.feature_name,
++                    "sketch_name": str(sketch_ref),
++                    "depth_mm": params.depth_mm,
++                    "operation": "cut" if params.cut else ("midplane" if params.midplane else "boss"),
++                    "direction": params.direction if not params.midplane else None,
++                    "failure_stage": "feature_name_readback",
++                    "retryable": False,
++                    "needs_inspection": True,
++                    "message": (
++                        f"Feature name readback mismatch: requested {params.feature_name!r}, got {actual_name!r}."
++                    ),
++                    "suggestion": "Do not retry blindly; inspect the already-created feature and document before continuing.",
++                }
++
+         return {
+             "status": "ok",
+             "shape": params.shape,
+@@ -2262,6 +2341,7 @@ def solidworks_sketch_and_extrude(params: SolidWorksSketchOnPlaneInput) -> str:
+             "sketch_name": str(sketch_ref),
+             "depth_mm": params.depth_mm,
+             "operation": "cut" if params.cut else ("midplane" if params.midplane else "boss"),
++            "direction": params.direction if not params.midplane else None,
+             "document": _model_summary(model),
+         }
+ 
+diff --git a/references/part-modeling.md b/references/part-modeling.md
+index 308be29bfa435d455cc219eb51a1b0fd5a19f0e8..8f4b2798c7700a656e10e0ceb5de9bbc55bb8e45 100644
+--- a/references/part-modeling.md
++++ b/references/part-modeling.md
+@@ -72,6 +72,17 @@ feature = extrude_boss(model, sketch_ref, mm(50))
+ 
+ ## 特征操作
+ 
++### 单向拉伸方向与 MCP 入口
++
++`extrude_boss()` 和 `extrude_cut()` 的 `direction` 参数是 SolidWorks `Dir` 标志：
++`True` 反转该操作的默认草图法向，`False` 保持默认方向。底层 Python API 的默认值仍为
++`True`，以保持既有脚本兼容性；MCP `solidworks_sketch_and_extrude` 的 `direction` 可选，
++省略时不传参并沿用该默认，显式传 `false`/`true` 才覆盖方向。切除与中面拉伸不能同时请求，
++入口会在访问 SolidWorks 文档前拒绝该组合。
++
++`feature_name` 若提供，入口会写入特征树名称并回读精确匹配；写入被 COM 拒绝或回读不一致
++时调用失败，不得将其报告为成功。
++
+ ### FeatureExtrusion3 参数详解
+ 
+ ```python
+diff --git a/tests/test_mcp_sketch_and_extrude.py b/tests/test_mcp_sketch_and_extrude.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..be29880c38c03b9c8ac279e15a0702afa71f7c78
+--- /dev/null
++++ b/tests/test_mcp_sketch_and_extrude.py
+@@ -0,0 +1,161 @@
++from contextlib import contextmanager
++import json
++from pathlib import Path
++from types import SimpleNamespace
++import sys
++
++import pytest
++
++sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "mcp-server"))
++import server
++
++
++def _params(**overrides):
++    values = {
++        "shape": "circle",
++        "radius_mm": 5.0,
++        "depth_mm": 10.0,
++        "plane_name": "Front Plane",
++        "center_x_mm": 0.0,
++        "center_y_mm": 0.0,
++        "midplane": False,
++        "cut": False,
++        "direction": None,
++        "feature_name": None,
++        "response_format": "json",
++    }
++    values.update(overrides)
++    return server.SolidWorksSketchOnPlaneInput(**values)
++
++
++def test_cut_midplane_is_rejected_before_active_com_call(monkeypatch):
++    called = False
++
++    def active_part():
++        nonlocal called
++        called = True
++        raise AssertionError("active SolidWorks document must not be queried")
++
++    monkeypatch.setattr(server, "_active_part_required", active_part)
++    result = json.loads(server.solidworks_sketch_and_extrude(_params(cut=True, midplane=True)))
++    assert called is False
++    assert result["status"] == "error"
++    assert "cut and midplane" in result["message"]
++
++
++def test_one_sided_direction_and_feature_name_are_applied(monkeypatch):
++    feature = SimpleNamespace(Name="Generated")
++    calls = []
++
++    @contextmanager
++    def fake_sketch(_model, _plane):
++        yield "Sketch1"
++
++    monkeypatch.setattr(server, "_active_part_required", lambda: (object(), object()))
++    monkeypatch.setattr(server, "_run_locked", lambda operation, *_args: operation())
++    monkeypatch.setattr(server, "sketch", fake_sketch)
++    monkeypatch.setattr(server, "sketch_circle", lambda *_args: None)
++    monkeypatch.setattr(server, "extrude_boss", lambda *args, **kwargs: calls.append((args, kwargs)) or feature)
++    monkeypatch.setattr(server, "_model_summary", lambda _model: {})
++
++    result = server.solidworks_sketch_and_extrude(
++        _params(direction=False, feature_name="BaseBoss")
++    )
++
++    assert calls[0][1]["direction"] is False
++    assert feature.Name == "BaseBoss"
++    assert result["feature_name"] == "BaseBoss"
++    assert result["direction"] is False
++
++
++def test_cut_dispatches_to_cut_with_explicit_direction(monkeypatch):
++    feature = SimpleNamespace(Name="Cut-Feature")
++    calls = []
++
++    @contextmanager
++    def fake_sketch(_model, _plane):
++        yield "Sketch1"
++
++    monkeypatch.setattr(server, "_active_part_required", lambda: (object(), object()))
++    monkeypatch.setattr(server, "_run_locked", lambda operation, *_args: operation())
++    monkeypatch.setattr(server, "sketch", fake_sketch)
++    monkeypatch.setattr(server, "sketch_circle", lambda *_args: None)
++    monkeypatch.setattr(server, "extrude_cut", lambda *args, **kwargs: calls.append((args, kwargs)) or feature)
++    monkeypatch.setattr(server, "extrude_midplane", lambda *_args: pytest.fail("midplane dispatch"))
++    monkeypatch.setattr(server, "_model_summary", lambda _model: {})
++
++    result = server.solidworks_sketch_and_extrude(_params(cut=True, direction=False))
++
++    assert calls[0][1]["direction"] is False
++    assert result["operation"] == "cut"
++    assert result["feature_created"] is True
++
++
++@pytest.mark.parametrize("reject_write", [False, True])
++def test_feature_name_write_or_readback_failure_is_not_success(monkeypatch, reject_write):
++    class RejectingFeature:
++        @property
++        def Name(self):
++            return "Original"
++
++        @Name.setter
++        def Name(self, _value):
++            raise RuntimeError("name rejected")
++
++    if reject_write:
++        feature = RejectingFeature()
++    else:
++        class SilentFeature:
++            @property
++            def Name(self):
++                return "Original"
++
++            @Name.setter
++            def Name(self, _value):
++                pass
++
++        feature = SilentFeature()
++
++    @contextmanager
++    def fake_sketch(_model, _plane):
++        yield "Sketch1"
++
++    monkeypatch.setattr(server, "_active_part_required", lambda: (object(), object()))
++    monkeypatch.setattr(server, "_load_automation_modules", lambda: None)
++    monkeypatch.setattr(server, "_coinitialize", lambda: None)
++    monkeypatch.setattr(server, "sketch", fake_sketch)
++    monkeypatch.setattr(server, "sketch_circle", lambda *_args: None)
++    monkeypatch.setattr(server, "extrude_boss", lambda *_args, **_kwargs: feature)
++    monkeypatch.setattr(server, "_model_summary", lambda _model: {})
++
++    result = json.loads(server.solidworks_sketch_and_extrude(_params(feature_name="Requested")))
++
++    assert result["status"] == "error"
++    assert result["feature_created"] is True
++    assert result["requested_feature_name"] == "Requested"
++    assert result["sketch_name"] == "Sketch1"
++    assert result["operation"] == "boss"
++    assert result["retryable"] is False
++    assert result["needs_inspection"] is True
++    assert result["failure_stage"] == ("feature_name_write" if reject_write else "feature_name_readback")
++    assert "Do not retry blindly" in result["suggestion"]
++
++
++def test_omitted_direction_preserves_underlying_default(monkeypatch):
++    feature = SimpleNamespace(Name="Generated")
++    calls = []
++
++    @contextmanager
++    def fake_sketch(_model, _plane):
++        yield "Sketch1"
++
++    monkeypatch.setattr(server, "_active_part_required", lambda: (object(), object()))
++    monkeypatch.setattr(server, "_run_locked", lambda operation, *_args: operation())
++    monkeypatch.setattr(server, "sketch", fake_sketch)
++    monkeypatch.setattr(server, "sketch_circle", lambda *_args: None)
++    monkeypatch.setattr(server, "extrude_cut", lambda *args, **kwargs: calls.append((args, kwargs)) or feature)
++    monkeypatch.setattr(server, "_model_summary", lambda _model: {})
++
++    server.solidworks_sketch_and_extrude(_params(cut=True))
++
++    assert calls[0][1] == {}

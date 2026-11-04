@@ -1,0 +1,169 @@
+diff --git a/mcp-server/server.py b/mcp-server/server.py
+index e02a3999926ceba6394c60040ed9be3ae4000518..5d90374c0aba7fc36621871c8c1d0e5ce34d3aa7 100644
+--- a/mcp-server/server.py
++++ b/mcp-server/server.py
+@@ -2181,6 +2181,7 @@ def solidworks_list_edges(params: SolidWorksEdgeInspectionInput = SolidWorksEdge
+                 "length_mm": item.get("length_mm"),
+                 "mid_point_mm": item.get("mid_point_mm"),
+                 "direction": [round(value, 6) for value in item["direction"]] if item.get("direction") else None,
++                "is_line": item.get("is_line"),
+                 "is_circle": item.get("is_circle"),
+                 "diameter_mm": item.get("diameter_mm"),
+                 "convexity": item.get("convexity"),
+diff --git a/scripts/sw_native_wire.cs b/scripts/sw_native_wire.cs
+index 0e3779727d49cc527c4c043da9e1121265ba04d8..81e653aa3ba1c49bc4ffc8f6a90f5b239e256b59 100644
+--- a/scripts/sw_native_wire.cs
++++ b/scripts/sw_native_wire.cs
+@@ -12,7 +12,7 @@ public static class NativeWireTools {
+  public class Sweep { public string name; public double[][] control_points_mm; public double diameter_mm; public double[] color; }
+  public class Box { public string name; public double[] bounds_mm,color; }
+  public class Spec { public Sweep[] sweeps; public Box[] boxes; }
+- public class Request { public int process_id; public string source,action,step_path,output_path,component_name,replacement_path,configuration,feature_name; public string[] body_names; public bool dry_run; public Spec spec; }
++ public class Request { public int process_id; public string source,action,step_path,output_path,component_name,replacement_path,configuration,feature_name; public string[] body_names; public bool dry_run,include_faces; public int max_faces; public Spec spec; }
+  static JavaScriptSerializer json=new JavaScriptSerializer {MaxJsonLength=int.MaxValue};
+  [DllImport("ole32.dll")] static extern int GetRunningObjectTable(int reserved,out System.Runtime.InteropServices.ComTypes.IRunningObjectTable table);
+  [DllImport("ole32.dll")] static extern int CreateBindCtx(int reserved,out System.Runtime.InteropServices.ComTypes.IBindCtx context);
+@@ -33,7 +33,27 @@ public static class NativeWireTools {
+  static IComponent2[] Components(IModelDoc2 d){return ((object[])((IAssemblyDoc)d).GetComponents(false)??new object[0]).Cast<IComponent2>().ToArray();}
+  static double[] Bounds(IBody2 b){return ((double[])b.GetBodyBox()).Select(v=>v*1000).ToArray();}
+  static double[] BodyColor(IBody2 b){var c=b.MaterialPropertyValues2 as double[];return c!=null&&c.Length>=3&&c.Take(3).All(v=>v>=0&&v<=1)?c.Take(3).ToArray():null;}
++ static object FaceRow(IFace2 f,int index){
++  var errors=new List<string>(); ISurface surface=null; bool? isPlane=null; string surfaceType="unknown"; double? area=null; double[] origin=null,normal=null;
++  try{surface=(ISurface)f.GetSurface();if(surface==null)throw new Exception("GetSurface returned null");}
++  catch(Exception e){errors.Add("GetSurface failed: "+e.Message);}
++  if(surface!=null){
++   try{if(surface.IsPlane()){isPlane=true;surfaceType="plane";}else if(surface.IsCylinder()){isPlane=false;surfaceType="cylinder";}else if(surface.IsCone()){isPlane=false;surfaceType="cone";}else if(surface.IsSphere()){isPlane=false;surfaceType="sphere";}else if(surface.IsTorus()){isPlane=false;surfaceType="torus";}else{isPlane=false;surfaceType="other";}}
++   catch(Exception e){errors.Add("surface type query failed: "+e.Message);}
++   if(isPlane==true)try{var p=(double[])surface.PlaneParams;if(p==null||p.Length<6)throw new Exception("PlaneParams has fewer than 6 values");if(p.Take(6).Any(v=>double.IsNaN(v)||double.IsInfinity(v)))throw new Exception("PlaneParams contains non-finite values");var n=new[]{p[0],p[1],p[2]};if(Math.Sqrt(n.Select(v=>v*v).Sum())<1e-12)throw new Exception("PlaneParams normal is zero");var o=new[]{p[3]*1000,p[4]*1000,p[5]*1000};if(o.Any(v=>double.IsNaN(v)||double.IsInfinity(v)))throw new Exception("PlaneParams origin conversion is non-finite");normal=n;origin=o;}
++   catch(Exception e){errors.Add("PlaneParams failed: "+e.Message);}
++  }
++  try{var value=f.GetArea();if(double.IsNaN(value)||double.IsInfinity(value)||value<0)throw new Exception("non-finite or negative area");var areaMm2=value*1000000;if(double.IsNaN(areaMm2)||double.IsInfinity(areaMm2))throw new Exception("converted area is non-finite");area=areaMm2;}
++  catch(Exception e){errors.Add("GetArea failed: "+e.Message);}
++  return new{index=index,surface_type=surfaceType,is_plane=isPlane,plane_origin_mm=origin,plane_normal=normal,normal_semantics=isPlane==true?"parameter_plane_normal_not_body_outward":null,area_mm2=area,units=new{plane_origin="mm",plane_normal="unitless",area="mm^2"},errors=errors.ToArray()};
++ }
+  static object BodyRow(IBody2 b){var m=b.GetMassProperties(1) as double[];return new {name=b.Name,type=b.GetType(),color=BodyColor(b),bounds_mm=Bounds(b),volume_mm3=m==null?0:m[3]*1e9,face_count=b.GetFaceCount()};}
++ static object BodyRow(IBody2 b,bool includeFaces,int maxFaces){
++  var baseRow=BodyRow(b);if(!includeFaces)return baseRow;
++  var errors=new List<string>();var faces=new List<object>();var all=(object[])b.GetFaces()??new object[0];int limit=Math.Min(maxFaces<=0?256:maxFaces,all.Length);
++  for(int i=0;i<limit;i++)try{faces.Add(FaceRow((IFace2)all[i],i));}catch(Exception e){errors.Add("face "+i+" enumeration failed: "+e.Message);}
++  return new{name=b.Name,type=b.GetType(),color=BodyColor(b),bounds_mm=Bounds(b),volume_mm3=((b.GetMassProperties(1) as double[])??new double[4])[3]*1e9,face_count=b.GetFaceCount(),faces=faces.ToArray(),faces_returned=faces.Count,faces_truncated=all.Length>limit,face_errors=errors.ToArray()};
++ }
+  static object ComponentRow(IComponent2 c){return new{name=c.Name2,path=c.GetPathName(),suppression=c.GetSuppression(),fixed_component=c.IsFixed(),transform=(double[])c.Transform2.ArrayData};}
+  static object Document(IModelDoc2 d){return new{title=d.GetTitle(),path=d.GetPathName(),type=d.GetType()};}
+  static IEnumerable<IFeature> Features(IModelDoc2 d){for(var f=(IFeature)d.FirstFeature();f!=null;f=(IFeature)f.GetNextFeature())yield return f;}
+@@ -73,7 +93,7 @@ public static class NativeWireTools {
+   // @brief 只有导入请求保存；未执行保存不能用 saved=false 冒充保存失败。
+   var r=json.Deserialize<Request>(input);var sw=Bind(r.process_id);var d=Guard(sw,r.source);var result=new Dictionary<string,object>{{"status","ok"},{"process_id",r.process_id},{"save_requested",r.action=="import"},{"manual_review_required",true}};
+   if(r.action=="inspect"){
+-   if(d.GetType()==1)result["bodies"]=Bodies(d).Select(BodyRow).ToArray();else if(d.GetType()==2)result["components"]=Components(d).Select(ComponentRow).ToArray();
++   if(d.GetType()==1)result["bodies"]=Bodies(d).Select(b=>BodyRow(b,r.include_faces,r.max_faces)).ToArray();else if(d.GetType()==2)result["components"]=Components(d).Select(ComponentRow).ToArray();
+    result["features"]=Features(d).Select(f=>new{name=f.Name,type=f.GetTypeName2()}).ToArray();
+   }else if(r.action=="build"){
+    if(d.GetType()!=1||d.GetActiveSketch2()!=null)throw new Exception("Part outside sketch mode required");
+diff --git a/scripts/sw_native_wire.py b/scripts/sw_native_wire.py
+index 7bf21395f8fdb3010009a9dca2db2c9f6e243e35..18be742be4424b8a0c3ca0471d98335e47eeba79 100644
+--- a/scripts/sw_native_wire.py
++++ b/scripts/sw_native_wire.py
+@@ -47,6 +47,10 @@ class Target(Strict):
+     expected_document_path: str = Field(min_length=1)
+     response_format: Literal['json','markdown'] = 'json'
+ 
++class InspectInput(Target):
++    include_faces: bool = False
++    max_faces: int = Field(default=256, ge=1, le=2048)
++
+ class BuildInput(Target):
+     spec_path: str = Field(min_length=1)
+     dry_run: bool = True
+@@ -94,9 +98,9 @@ def register_tools(mcp, connect, run_locked, response_enum):
+         return run_locked(op,response_enum(params.response_format))
+ 
+     @mcp.tool(name='solidworks_inspect_native_geometry',annotations={'readOnlyHint':True,'destructiveHint':False})
+-    def inspect(params:Target)->str:
++    def inspect(params:InspectInput)->str:
+         """读取实体名称、包围盒、体积、错误和组件变换，不保存。"""
+-        return run(params,'inspect')
++        return run(params,'inspect',include_faces=params.include_faces,max_faces=params.max_faces)
+ 
+     @mcp.tool(name='solidworks_build_round_sweeps',annotations={'readOnlyHint':False,'destructiveHint':False})
+     def build(params:BuildInput)->str:
+diff --git a/tests/manual_native_wire_2026.py b/tests/manual_native_wire_2026.py
+index 9d0dc14b14274ff4b8bd2f3745bcc931e0cff71e..11dd64476f64382e61ac5d688d8209b01df08ddf 100644
+--- a/tests/manual_native_wire_2026.py
++++ b/tests/manual_native_wire_2026.py
+@@ -71,7 +71,7 @@ def call(name, params, expected="ok"):
+ 
+ def inspect(model):
+     active(model)
+-    return call("solidworks_inspect_native_geometry", native.Target(expected_document_path=str(get(model, "GetPathName"))))
++    return call("solidworks_inspect_native_geometry", native.InspectInput(expected_document_path=str(get(model, "GetPathName"))))
+ 
+ def build(model, spec, dry=False):
+     active(model)
+diff --git a/tests/test_native_wire_mcp.py b/tests/test_native_wire_mcp.py
+index 4d0c8966088f336417003c0df200fc97d3aaa590..71d45adf62e943df6667ad1586e0367b8712d337 100644
+--- a/tests/test_native_wire_mcp.py
++++ b/tests/test_native_wire_mcp.py
+@@ -63,6 +63,7 @@ def test_connection_is_resolved_after_loader_under_host_lock(monkeypatch, tmp_pa
+ 
+     def inspect(actual_sw, target, action, **values):
+         assert actual_sw is sw and action == "inspect"
++        assert values == {"include_faces": False, "max_faces": 256}
+         calls.append("inspect")
+         return {"status": "ok", "bodies": []}
+ 
+@@ -71,7 +72,7 @@ def test_connection_is_resolved_after_loader_under_host_lock(monkeypatch, tmp_pa
+     monkeypatch.setattr(server, "pythoncom", None)
+     monkeypatch.setattr(server, "_artifact_access", lambda: type("Artifacts", (), {"publish": lambda self, payload: []})())
+     monkeypatch.setattr(native, "invoke_native", inspect)
+-    params = native.Target(expected_document_path=str(tmp_path / "target.sldprt"))
++    params = native.InspectInput(expected_document_path=str(tmp_path / "target.sldprt"))
+     result = json.loads(server.mcp._tool_manager._tools["solidworks_inspect_native_geometry"].fn(params))
+     assert result["status"] == "ok"
+     assert calls == ["load", "connect", "inspect"]
+@@ -88,7 +89,7 @@ def test_native_results_preserve_success_and_save_facts(operation, monkeypatch,
+     step = tmp_path / "fixture.step"
+     step.touch()
+     requests = {
+-        "inspect": ("solidworks_inspect_native_geometry", native.Target(expected_document_path=target)),
++        "inspect": ("solidworks_inspect_native_geometry", native.InspectInput(expected_document_path=target)),
+         "dry_run": ("solidworks_build_round_sweeps", native.BuildInput(expected_document_path=target, spec_path=str(spec))),
+         "build": ("solidworks_build_round_sweeps", native.BuildInput(expected_document_path=target, spec_path=str(spec), dry_run=False)),
+         "exclude": ("solidworks_exclude_reviewed_bodies", native.DeleteInput(expected_document_path=target, body_names=["Body1"])),
+@@ -115,6 +116,13 @@ def test_native_results_preserve_success_and_save_facts(operation, monkeypatch,
+     assert calls == [{"dry_run": "build"}.get(operation, operation)]
+ 
+ 
++def test_inspect_face_options_are_explicit_and_bounded(tmp_path):
++    default = native.InspectInput(expected_document_path=str(tmp_path / "target.sldprt"))
++    assert default.include_faces is False and default.max_faces == 256
++    requested = native.InspectInput(expected_document_path=default.expected_document_path, include_faces=True, max_faces=12)
++    assert requested.include_faces is True and requested.max_faces == 12
++
++
+ def test_real_save_failure_is_still_an_error(monkeypatch):
+     """@brief 新工具的未保存语义不能削弱现有保存失败保护。"""
+     monkeypatch.setattr(server, "pythoncom", None)
+diff --git a/tests/test_mcp_edge_readback.py b/tests/test_mcp_edge_readback.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_mcp_edge_readback.py
+@@ -0,0 +1,18 @@
++"""Expose native curve classification without treating all noncircles as lines."""
++from pathlib import Path
++import sys
++
++sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "mcp-server"))
++import server
++
++
++def test_list_edges_preserves_true_false_and_unknown_line_classification(monkeypatch):
++    descriptors = [dict(index=i, length_mm=10.0, direction=[1.0, 0.0, 0.0],
++                        mid_point_mm=[0.0, 0.0, 0.0], is_line=value, is_circle=False)
++                   for i, value in enumerate([True, False, None])]
++    monkeypatch.setattr(server, "_active_part_required", lambda: (object(), object()))
++    monkeypatch.setattr(server, "_run_locked", lambda operation, *_args: operation())
++    monkeypatch.setattr(server, "iter_model_edges", lambda _model: (descriptors, []), raising=False)
++    monkeypatch.setattr(server, "filter_edges", lambda items, **_kwargs: (items, []), raising=False)
++    result = server.solidworks_list_edges(server.SolidWorksEdgeInspectionInput(include_convexity=False, response_format="json"))
++    assert [edge["is_line"] for edge in result["edges"]] == [True, False, None]

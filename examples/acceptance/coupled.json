@@ -1,0 +1,19 @@
+{
+  "id": "coupled-local-iteration",
+  "status": "planned_not_executed",
+  "mode": "coupled",
+  "goal": "Relate a design revision to its analysis model and use evidence to select CAD, CAE or mapping-only changes",
+  "seed_tasks": ["cad-expression-change", "cae-cantilever-models"],
+  "required_demonstrations": [
+    "Versioned entity correspondence, coordinate frame, unit conversion, simplification and interface/load transfer",
+    "A user geometry edit invalidates only dependent results while preserving prior input snapshots",
+    "A CAE-only numerical-quality change reuses unchanged geometry with an explicit reason",
+    "An intentionally mismatched realized thickness is detected before interpreting results",
+    "A persistent backend job survives a fresh Codex chat without duplicate submission",
+    "At least one historical unit adopted and one limited/rejected with condition comparisons",
+    "A held-out change not enumerated by the skill causes Codex to generate or recombine candidates"
+  ],
+  "proposed_limits": {"max_solves": 8, "max_design_revisions": 4},
+  "environment_gate": "Choose the held-out condition from the available task family and fix numerical limits, wall-clock budget and independent references before executing",
+  "acceptance_ids": ["AC-06", "AC-07", "AC-10", "AC-14", "AC-15", "AC-16", "AC-17", "AC-18"]
+}

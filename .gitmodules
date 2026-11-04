@@ -1,0 +1,8 @@
+[submodule "execution-skills/solidworks-automation-skill"]
+	path = execution-skills/solidworks-automation-skill
+	url = https://github.com/TuKJet/solidworks-automation-skill.git
+	branch = vm-sw-automation-skill
+[submodule "execution-skills/cae-agent-hub"]
+	path = execution-skills/cae-agent-hub
+	url = https://github.com/Cai-aa/CAE-Agent-Hub.git
+	branch = main

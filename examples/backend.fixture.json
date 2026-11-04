@@ -1,0 +1,38 @@
+{
+  "schema": "eds-backend/v1",
+  "id": "example-cae-fixture",
+  "domain": "cae",
+  "codex_server": "user-selected-server",
+  "fixture": true,
+  "capabilities": {
+    "inspect": {
+      "tool": "example_inspect_model",
+      "description": "Example only: return actual domains, materials, constraints, units and revision",
+      "read_only": true,
+      "inputs": {"model": {"type": "string"}}
+    },
+    "configure": {
+      "tool": "example_configure_model",
+      "description": "Example only: configure one explicitly identified model revision",
+      "inputs": {"model": {"type": "string"}, "settings": {"type": "object"}}
+    },
+    "solve": {
+      "tool": "example_submit_solve",
+      "description": "Example only: submit a persistent job; task id is not a completion signal",
+      "async": true,
+      "query_tool": "example_query_job",
+      "task_id_field": "job_id",
+      "inputs": {
+        "model": {"type": "string"},
+        "load": {"type": "number", "unit": "N", "backend_unit": "N", "minimum": 0}
+      },
+      "status_map": {"queued": "submitted", "solving": "running", "finished": "completed", "error": "failed"}
+    },
+    "results": {
+      "tool": "example_get_results",
+      "description": "Example only: read verified output locations, numerical diagnostics and quantities with units",
+      "read_only": true,
+      "inputs": {"job_id": {"type": "string"}}
+    }
+  }
+}

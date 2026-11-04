@@ -1,0 +1,275 @@
+diff --git a/scripts/sw_edge_select.py b/scripts/sw_edge_select.py
+index e65786ea98c1187f32835b084c26d1847fdfb204..e80ad148b58339362557aea024fc788569363677 100644
+--- a/scripts/sw_edge_select.py
++++ b/scripts/sw_edge_select.py
+@@ -56,6 +56,8 @@ def _to_mm(values):
+ 
+ def _normalize(vector):
+     """@brief 归一化向量，零向量返回 None。"""
++    if any(_finite_number(component) is None for component in vector):
++        return None
+     length = math.sqrt(sum(component * component for component in vector))
+     if length < 1e-12:
+         return None
+@@ -71,6 +73,40 @@ def _is_parallel(first, second, angle_tolerance_deg=1.0):
+     return math.degrees(math.acos(dot)) <= angle_tolerance_deg
+ 
+ 
++def _finite_number(value):
++    """Return a finite float, or ``None`` for invalid COM numeric values."""
++    try:
++        number = float(value)
++    except (TypeError, ValueError):
++        return None
++    return number if math.isfinite(number) else None
++
++
++def _curve_bounds(edge):
++    """Read the trimmed curve parameter interval without changing its sense."""
++    errors = []
++    try:
++        data = get_com_member(edge, "GetCurveParams3")
++        start = _finite_number(getattr(data, "UMinValue"))
++        end = _finite_number(getattr(data, "UMaxValue"))
++        if start is None or end is None:
++            raise ValueError("UMinValue/UMaxValue is not finite")
++        return start, end, errors
++    except Exception as exc:
++        errors.append(f"读取曲线参数范围(GetCurveParams3)失败: {exc}")
++
++    try:
++        values = list(get_com_member(edge, "GetCurveParams2") or [])
++        start = _finite_number(values[6])
++        end = _finite_number(values[7])
++        if start is None or end is None:
++            raise ValueError("GetCurveParams2()[6]/[7] is not finite")
++        return start, end, errors
++    except Exception as exc:
++        errors.append(f"读取曲线参数范围(GetCurveParams2)失败: {exc}")
++        return None, None, errors
++
++
+ def describe_edge(edge, index=0):
+     """
+     读取一条边的几何描述。
+@@ -97,25 +133,71 @@ def describe_edge(edge, index=0):
+     }
+ 
+     curve_params = None
++    curve = None
+     try:
+         curve = get_com_member(edge, "GetCurve")
+-        curve_params = list(get_com_member(edge, "GetCurveParams2") or [])
+         descriptor["is_line"] = bool(_safe(curve, "IsLine"))
+         descriptor["is_circle"] = bool(_safe(curve, "IsCircle"))
+     except Exception as exc:
+         descriptor["errors"].append(f"读取曲线类型失败: {exc}")
+ 
++    # Params2 is retained only for legacy diameter/direction compatibility;
++    # unsupported wrappers must not prevent the curve-length path above.
+     try:
+-        descriptor["length_mm"] = round(float(_safe(edge, "GetLength")) * _MM_PER_M, 6)
+-    except Exception as exc:
+-        descriptor["errors"].append(f"读取边长失败: {exc}")
++        curve_params = list(get_com_member(edge, "GetCurveParams2") or [])
++    except Exception:
++        curve_params = None
++
++    start_param, end_param, bound_errors = _curve_bounds(edge)
++    length_m = None
++    if curve is not None and start_param is not None and end_param is not None:
++        try:
++            length_m = _finite_number(curve.GetLength3(start_param, end_param))
++            if length_m is None or length_m < 0.0:
++                raise ValueError("GetLength3 returned a non-finite or negative value")
++        except Exception as exc:
++            descriptor["errors"].append(f"读取曲线长度(GetLength3)失败: {exc}")
++            try:
++                length_m = _finite_number(curve.GetLength2(start_param, end_param))
++                if length_m is None or length_m < 0.0:
++                    raise ValueError("GetLength2 returned a non-finite or negative value")
++            except Exception as fallback_exc:
++                length_m = None
++                descriptor["errors"].append(f"读取曲线长度(GetLength2)失败: {fallback_exc}")
++    # A chord is only a valid last resort for a curve explicitly identified as a
++    # line.  It must never turn an unknown/spline edge into a plausible length.
++    if length_m is None and descriptor["is_line"] is True:
++        try:
++            start_point = list(get_com_member(get_com_member(edge, "GetStartVertex"), "GetPoint") or [])
++            end_point = list(get_com_member(get_com_member(edge, "GetEndVertex"), "GetPoint") or [])
++            if len(start_point) < 3 or len(end_point) < 3:
++                raise ValueError("line endpoints are incomplete")
++            coordinates = [_finite_number(value) for value in (*start_point[:3], *end_point[:3])]
++            if any(value is None for value in coordinates):
++                raise ValueError("line endpoints contain non-finite coordinates")
++            length_m = math.sqrt(sum((coordinates[axis + 3] - coordinates[axis]) ** 2 for axis in range(3)))
++        except Exception as exc:
++            descriptor["errors"].append(f"直线端点长度fallback失败: {exc}")
++
++    if length_m is not None:
++        descriptor["length_mm"] = round(length_m * _MM_PER_M, 6)
++    else:
++        descriptor["errors"].extend(bound_errors if bound_errors else ["读取边长失败: 无可用曲线长度方法"])
+ 
+     # 中点优先用边的起止顶点（IEdge::GetStartVertex/GetEndVertex），
+     # 这是不受曲线参数排列差异影响的方式。
+     start_mm = end_mm = None
+     try:
+-        start_mm = _to_mm(list(get_com_member(get_com_member(edge, "GetStartVertex"), "GetPoint") or []))
+-        end_mm = _to_mm(list(get_com_member(get_com_member(edge, "GetEndVertex"), "GetPoint") or []))
++        start_values = list(get_com_member(get_com_member(edge, "GetStartVertex"), "GetPoint") or [])
++        end_values = list(get_com_member(get_com_member(edge, "GetEndVertex"), "GetPoint") or [])
++        if len(start_values) < 3 or len(end_values) < 3:
++            raise ValueError("端点坐标不完整")
++        start_values = [_finite_number(value) for value in start_values[:3]]
++        end_values = [_finite_number(value) for value in end_values[:3]]
++        if any(value is None for value in (*start_values, *end_values)):
++            raise ValueError("端点坐标包含非有限值")
++        start_mm = _to_mm(start_values)
++        end_mm = _to_mm(end_values)
+     except Exception as exc:
+         descriptor["errors"].append(f"读取端点失败: {exc}")
+ 
+diff --git a/tests/test_sw_edge_select.py b/tests/test_sw_edge_select.py
+index ebbbdcfa7e38ee747f1286d8b0353e564a0ef21b..64b59d9ab4d02ee9568553933df9f1c4e6bc2032 100644
+--- a/tests/test_sw_edge_select.py
++++ b/tests/test_sw_edge_select.py
+@@ -21,8 +21,9 @@ import scripts.sw_edge_select as sw_edge_select  # noqa: E402
+ class FakeCurve:
+     """曲线替身。"""
+ 
+-    def __init__(self, is_circle=False):
++    def __init__(self, is_circle=False, length_m=None):
+         self._circle = is_circle
++        self._length_m = length_m
+ 
+     def IsLine(self):
+         return not self._circle
+@@ -30,6 +31,12 @@ class FakeCurve:
+     def IsCircle(self):
+         return self._circle
+ 
++    def GetLength3(self, start, end):
++        return self._length_m
++
++    def GetLength2(self, start, end):
++        return self._length_m
++
+ 
+ class FakeVertex:
+     """顶点替身。"""
+@@ -63,7 +70,10 @@ class FakeEdge:
+         return self._length
+ 
+     def GetCurve(self):
+-        return FakeCurve(self._is_circle)
++        return FakeCurve(self._is_circle, self._length)
++
++    def GetCurveParams3(self):
++        return types.SimpleNamespace(UMinValue=0.0, UMaxValue=1.0)
+ 
+     def GetStartVertex(self):
+         return FakeVertex(self._start)
+@@ -148,6 +158,102 @@ def test_edge_length_and_midpoint_in_mm():
+     assert descriptor["is_circle"] is False
+ 
+ 
++def test_edge_length_uses_trimmed_curve_api_and_not_iedge_get_length():
++    """IEdge has no GetLength; the trimmed ICurve length is authoritative."""
++    edge = FakeEdge((0.0, 0.0, 0.0), (0.0, 0.0, 0.01), length_m=0.0125)
++    edge.GetLength = lambda: (_ for _ in ()).throw(AssertionError("must not call IEdge.GetLength"))
++
++    descriptor = sw_edge_select.describe_edge(edge)
++
++    assert descriptor["length_mm"] == pytest.approx(12.5)
++    assert not any("IEdge" in error for error in descriptor["errors"])
++
++
++def test_curve_length_preserves_negative_and_reversed_parameter_bounds():
++    class Curve(FakeCurve):
++        def GetLength3(self, start, end):
++            assert (start, end) == (-2.5, -0.5)
++            return 0.004
++
++    edge = FakeEdge((0.0, 0.0, 0.0), (0.0, 0.0, 0.004), length_m=0.001)
++    edge.GetCurve = lambda: Curve(length_m=0.004)
++    edge.GetCurveParams3 = lambda: types.SimpleNamespace(UMinValue=-2.5, UMaxValue=-0.5)
++
++    assert sw_edge_select.describe_edge(edge)["length_mm"] == pytest.approx(4.0)
++
++
++def test_curve_params2_bounds_are_compatibility_fallback():
++    edge = FakeEdge((0.0, 0.0, 0.0), (0.0, 0.0, 0.004), length_m=0.004)
++    edge.GetCurveParams3 = None
++    edge.GetCurveParams2 = lambda: [0, 0, 0, 0, 0, 0, -3.0, -1.0]
++    calls = []
++    curve = edge.GetCurve()
++    curve.GetLength3 = lambda start, end: calls.append((start, end)) or 0.004
++    edge.GetCurve = lambda: curve
++
++    assert sw_edge_select.describe_edge(edge)["length_mm"] == pytest.approx(4.0)
++    assert calls == [(-3.0, -1.0)]
++
++
++def test_get_length2_fallback_reuses_raw_bounds_and_returns_mm():
++    class Curve(FakeCurve):
++        def __init__(self):
++            super().__init__(length_m=None)
++            self.calls = []
++
++        def GetLength3(self, start, end):
++            self.calls.append(("GetLength3", start, end))
++            raise RuntimeError("GetLength3 unavailable")
++
++        def GetLength2(self, start, end):
++            self.calls.append(("GetLength2", start, end))
++            return 0.0045
++
++    curve = Curve()
++    edge = FakeEdge((0.0, 0.0, 0.0), (0.0, 0.0, 0.0045))
++    edge.GetCurve = lambda: curve
++    edge.GetCurveParams3 = lambda: types.SimpleNamespace(UMinValue=-4.25, UMaxValue=-1.75)
++
++    descriptor = sw_edge_select.describe_edge(edge)
++
++    assert descriptor["length_mm"] == pytest.approx(4.5)
++    assert curve.calls == [
++        ("GetLength3", -4.25, -1.75),
++        ("GetLength2", -4.25, -1.75),
++    ]
++    assert any("GetLength3" in error for error in descriptor["errors"])
++
++
++def test_negative_curve_length_is_rejected_and_error_is_preserved():
++    class NegativeCurve(FakeCurve):
++        def GetLength3(self, start, end):
++            return -0.004
++
++        def GetLength2(self, start, end):
++            return -0.004
++
++    edge = FakeEdge((0.0, 0.0, 0.0), (0.0, 0.0, 0.004))
++    edge.GetCurve = lambda: NegativeCurve()
++
++    descriptor = sw_edge_select.describe_edge(edge)
++
++    assert descriptor["length_mm"] == pytest.approx(4.0)
++    assert any("GetLength3" in error and "negative" in error for error in descriptor["errors"])
++    assert any("GetLength2" in error and "negative" in error for error in descriptor["errors"])
++
++
++def test_unknown_curve_does_not_fallback_to_chord():
++    edge = FakeEdge((0.0, 0.0, 0.0), (0.0, 0.0, 0.01), length_m=0.01)
++    edge.GetCurve = lambda: types.SimpleNamespace(IsLine=lambda: False, IsCircle=lambda: False)
++    edge.GetCurveParams3 = None
++    edge.GetCurveParams2 = lambda: [0] * 6
++
++    descriptor = sw_edge_select.describe_edge(edge)
++
++    assert descriptor["length_mm"] is None
++    assert descriptor["errors"]
++
++
+ def test_edge_direction_is_normalised():
+     """@brief 直线方向应归一化，便于按轴筛选。"""
+     edge = FakeEdge((0.0, 0.0, 0.0), (0.0, 0.0, 0.02))

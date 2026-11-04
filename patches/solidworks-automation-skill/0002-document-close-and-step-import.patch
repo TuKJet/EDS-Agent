@@ -1,0 +1,281 @@
+diff --git a/mcp-server/server.py b/mcp-server/server.py
+index 8ce47e967c041e415f700568242b4f679f6d3e10..e02a3999926ceba6394c60040ed9be3ae4000518 100644
+--- a/mcp-server/server.py
++++ b/mcp-server/server.py
+@@ -819,6 +819,9 @@ class SolidWorksCloseDocumentsInput(BaseInput):
+ 
+     close_all: bool = Field(default=False, description="Close all documents when true; otherwise close active document.")
+     save_changes: bool = Field(default=False, description="Whether SolidWorks should save changed documents when closing all.")
++    expected_title: Optional[str] = Field(default=None, min_length=1, description="Exact active-document title required for an explicitly authorized unsaved close.")
++    expected_type: Optional[int] = Field(default=None, ge=1, le=3, description="Exact SolidWorks document type required for an explicitly authorized unsaved close.")
++    discard_unsaved: bool = Field(default=False, description="Explicitly authorize discarding the exact active unsaved document identified by expected_title and expected_type.")
+     response_format: ResponseFormat = Field(default=ResponseFormat.JSON, description="Return format.")
+ 
+ 
+@@ -2792,6 +2795,12 @@ def solidworks_open_document(params: SolidWorksOpenDocumentInput) -> str:
+ 
+     def op():
+         global _document_context
++        suffix = Path(params.path).suffix.lower()
++        if suffix not in {".sldprt", ".sldasm", ".slddrw"}:
++            raise ValueError(
++                "solidworks_open_document accepts only native SolidWorks formats "
++                "(.sldprt/.sldasm/.slddrw); use solidworks_import_step_part for STEP"
++            )
+         sw, _ = connect_solidworks(wait_seconds=1)
+         model = open_document(
+             sw,
+@@ -2922,25 +2931,60 @@ def solidworks_close_documents(params: SolidWorksCloseDocumentsInput = SolidWork
+ 
+     def op():
+         global _document_context
+-        sw, model = _active_model_required()
++        sw, model = connect_solidworks(wait_seconds=1)
+         if params.close_all:
+             sw.CloseAllDocuments(bool(params.save_changes))
++            remaining = list(get_com_member(sw, "GetDocuments", default=[]) or [])
++            if remaining or get_com_member(sw, "ActiveDoc", default=None) is not None:
++                raise RuntimeError("关闭全部文档后仍检测到打开文档，拒绝报告成功")
+             # 文档已关闭，其 ISketch 引用必须立即释放；否则常驻进程会一直持有
+             # 已关闭文档的 COM 对象，导致 SolidWorks 侧无法释放文档。
+             clear_sketch_selection_cache()
+             _document_context = None
+             return {"status": "ok", "closed": "all", "save_changes": params.save_changes}
++        model = sw.ActiveDoc or model
++        if model is None:
++            raise RuntimeError("No active SolidWorks document. Use solidworks_open_document or solidworks_new_document first.")
++        _verify_document_context(sw, model)
+         path = str(get_com_member(model, "GetPathName") or "")
+-        if not path or _document_context and Path(path).resolve() != Path(_document_context["path"]).resolve():
+-            raise RuntimeError("拒绝关闭：当前文档没有可核实的唯一完整路径")
+         title = get_com_member(model, "GetTitle")
++        doc_type = int(get_com_member(model, "GetType", default=0) or 0)
++        if not path:
++            if not params.discard_unsaved or params.expected_title != str(title) or params.expected_type != doc_type:
++                raise RuntimeError("拒绝关闭：未保存文档必须提供精确标题、类型和显式丢弃确认")
++            candidates = [
++                candidate for candidate in (get_com_member(sw, "GetDocuments", default=[]) or [])
++                if str(get_com_member(candidate, "GetTitle", default="") or "") == str(title)
++            ]
++            active = get_com_member(sw, "ActiveDoc", default=None)
++            active_matches = (
++                active is not None
++                and str(get_com_member(active, "GetTitle", default="") or "") == str(title)
++                and int(get_com_member(active, "GetType", default=0) or 0) == doc_type
++                and not str(get_com_member(active, "GetPathName", default="") or "")
++            )
++            if len(candidates) != 1 or not active_matches:
++                raise RuntimeError("拒绝关闭：未保存文档目标不唯一或不是当前活动文档")
++        elif _document_context and Path(path).resolve() != Path(_document_context["path"]).resolve():
++            raise RuntimeError("拒绝关闭：当前文档没有可核实的唯一完整路径")
+         same_title = []
+         for candidate in get_com_member(sw, "GetDocuments", default=[]) or []:
+             if str(get_com_member(candidate, "GetTitle", default="") or "") == str(title):
+                 same_title.append(str(get_com_member(candidate, "GetPathName", default="") or ""))
+-        if sum(bool(item) and Path(item).resolve() == Path(path).resolve() for item in same_title) != 1 or len(same_title) != 1:
++        if path and (sum(bool(item) and Path(item).resolve() == Path(path).resolve() for item in same_title) != 1 or len(same_title) != 1):
+             raise RuntimeError("拒绝关闭：标题不唯一，无法安全解析到完整路径")
+         sw.CloseDoc(title)
++        remaining = []
++        for candidate in get_com_member(sw, "GetDocuments", default=[]) or []:
++            if str(get_com_member(candidate, "GetTitle", default="") or "") != str(title):
++                continue
++            if int(get_com_member(candidate, "GetType", default=0) or 0) != doc_type:
++                continue
++            candidate_path = str(get_com_member(candidate, "GetPathName", default="") or "")
++            if (not path and not candidate_path) or (path and candidate_path == path):
++                remaining.append(candidate)
++        if remaining:
++            raise RuntimeError("关闭后仍检测到目标文档，拒绝报告成功")
+         clear_sketch_selection_cache(model)
+         _document_context = None
+         return {"status": "ok", "closed": title}
+diff --git a/tests/test_mcp_document_context.py b/tests/test_mcp_document_context.py
+index 275fd5b3ab9c54f19b7dc721b1f219925d588ce3..d1d226c06072171e4465577a65b19358d051088f 100644
+--- a/tests/test_mcp_document_context.py
++++ b/tests/test_mcp_document_context.py
+@@ -61,3 +61,184 @@ def test_close_rejects_duplicate_title(monkeypatch, tmp_path):
+     params = SimpleNamespace(close_all=False, save_changes=False, response_format="json")
+     with pytest.raises(RuntimeError, match="标题不唯一"):
+         server.solidworks_close_documents(params)
++
++
++def test_close_saved_duplicate_title_and_type_does_not_call_close_doc(monkeypatch, tmp_path):
++    source = tmp_path / "same.sldprt"
++    other = tmp_path / "other.sldprt"
++    first, second = model(source, doc_type=1), model(other, doc_type=1)
++    first.GetTitle = lambda: "same.sldprt"
++    second.GetTitle = lambda: "same.sldprt"
++    app = SimpleNamespace(
++        ActiveDoc=first,
++        GetDocuments=lambda: [first, second],
++        close_calls=[],
++    )
++    app.CloseDoc = lambda title: app.close_calls.append(title)
++    monkeypatch.setattr(server, "connect_solidworks", lambda **_: (app, first), raising=False)
++    monkeypatch.setattr(server, "get_com_member", lambda obj, name, default=None, *args: getattr(obj, name, default)() if callable(getattr(obj, name, None)) else getattr(obj, name, default), raising=False)
++    monkeypatch.setattr(server, "_run_locked", lambda operation, *args, **kwargs: operation())
++    server._document_context = {"path": str(source), "type": 1, "configuration": "Default"}
++    params = SimpleNamespace(close_all=False, save_changes=False, response_format="json")
++
++    with pytest.raises(RuntimeError, match="标题不唯一"):
++        server.solidworks_close_documents(params)
++
++    assert app.close_calls == []
++
++
++def test_close_all_rejects_when_documents_remain_after_close(monkeypatch):
++    remaining = SimpleNamespace()
++    app = SimpleNamespace(
++        ActiveDoc=None,
++        GetDocuments=lambda: [remaining],
++        CloseAllDocuments=lambda save_changes: None,
++    )
++    monkeypatch.setattr(server, "connect_solidworks", lambda **_: (app, None), raising=False)
++    monkeypatch.setattr(server, "get_com_member", lambda obj, name, default=None, *args: getattr(obj, name, default)() if callable(getattr(obj, name, None)) else getattr(obj, name, default), raising=False)
++    monkeypatch.setattr(server, "_run_locked", lambda operation, *args, **kwargs: operation())
++    server._document_context = {"path": "saved.sldprt", "type": 1, "configuration": "Default"}
++    params = SimpleNamespace(close_all=True, save_changes=False, response_format="json")
++
++    with pytest.raises(RuntimeError, match="仍检测到打开文档"):
++        server.solidworks_close_documents(params)
++
++
++def test_close_all_rejects_when_active_document_remains_after_close(monkeypatch):
++    active = SimpleNamespace()
++    app = SimpleNamespace(
++        ActiveDoc=active,
++        GetDocuments=lambda: [],
++        CloseAllDocuments=lambda save_changes: None,
++    )
++    monkeypatch.setattr(server, "connect_solidworks", lambda **_: (app, None), raising=False)
++    monkeypatch.setattr(server, "get_com_member", lambda obj, name, default=None, *args: getattr(obj, name, default)() if callable(getattr(obj, name, None)) else getattr(obj, name, default), raising=False)
++    monkeypatch.setattr(server, "_run_locked", lambda operation, *args, **kwargs: operation())
++    server._document_context = {"path": "saved.sldprt", "type": 1, "configuration": "Default"}
++    params = SimpleNamespace(close_all=True, save_changes=False, response_format="json")
++
++    with pytest.raises(RuntimeError, match="仍检测到打开文档"):
++        server.solidworks_close_documents(params)
++
++
++def test_close_explicitly_authorizes_exact_unsaved_active_document(monkeypatch):
++    first = SimpleNamespace(
++        GetPathName=lambda: "", GetType=lambda: 1, GetTitle=lambda: "A-cut.SLDPRT"
++    )
++    app = SimpleNamespace(ActiveDoc=first, docs=[first], closed=[])
++    app.GetDocuments = lambda: list(app.docs)
++    def close_doc(title):
++        app.closed.append(title)
++        app.docs = []
++        app.ActiveDoc = None
++    app.CloseDoc = close_doc
++    monkeypatch.setattr(server, "connect_solidworks", lambda **_: (app, first), raising=False)
++    monkeypatch.setattr(server, "get_com_member", lambda obj, name, default=None, *args: getattr(obj, name, default)() if callable(getattr(obj, name, None)) else getattr(obj, name, default), raising=False)
++    monkeypatch.setattr(server, "_run_locked", lambda operation, *args, **kwargs: operation())
++    cleared = []
++    monkeypatch.setattr(server, "clear_sketch_selection_cache", lambda model=None: cleared.append(model), raising=False)
++    server._document_context = None
++    params = SimpleNamespace(
++        close_all=False, save_changes=False, expected_title="A-cut.SLDPRT",
++        expected_type=1, discard_unsaved=True, response_format="json"
++    )
++    result = server.solidworks_close_documents(params)
++    assert result == {"status": "ok", "closed": "A-cut.SLDPRT"}
++    assert app.closed == ["A-cut.SLDPRT"]
++    assert cleared == [first]
++
++
++def test_close_unsaved_requires_explicit_identity_and_discard_confirmation(monkeypatch):
++    first = SimpleNamespace(GetPathName=lambda: "", GetType=lambda: 1, GetTitle=lambda: "A-cut.SLDPRT")
++    app = SimpleNamespace(ActiveDoc=first, GetDocuments=lambda: [first])
++    monkeypatch.setattr(server, "connect_solidworks", lambda **_: (app, first), raising=False)
++    monkeypatch.setattr(server, "get_com_member", lambda obj, name, default=None, *args: getattr(obj, name, default)() if callable(getattr(obj, name, None)) else getattr(obj, name, default), raising=False)
++    monkeypatch.setattr(server, "_run_locked", lambda operation, *args, **kwargs: operation())
++    server._document_context = None
++    params = SimpleNamespace(
++        close_all=False, save_changes=False, expected_title=None,
++        expected_type=None, discard_unsaved=False, response_format="json"
++    )
++    with pytest.raises(RuntimeError, match="显式丢弃确认"):
++        server.solidworks_close_documents(params)
++
++
++def test_close_unsaved_rejects_ambiguous_exact_targets(monkeypatch):
++    first = SimpleNamespace(GetPathName=lambda: "", GetType=lambda: 1, GetTitle=lambda: "A-cut.SLDPRT")
++    second = SimpleNamespace(GetPathName=lambda: "", GetType=lambda: 1, GetTitle=lambda: "A-cut.SLDPRT")
++    app = SimpleNamespace(ActiveDoc=first, GetDocuments=lambda: [first, second])
++    monkeypatch.setattr(server, "connect_solidworks", lambda **_: (app, first), raising=False)
++    monkeypatch.setattr(server, "get_com_member", lambda obj, name, default=None, *args: getattr(obj, name, default)() if callable(getattr(obj, name, None)) else getattr(obj, name, default), raising=False)
++    monkeypatch.setattr(server, "_run_locked", lambda operation, *args, **kwargs: operation())
++    server._document_context = None
++    params = SimpleNamespace(
++        close_all=False, save_changes=False, expected_title="A-cut.SLDPRT",
++        expected_type=1, discard_unsaved=True, response_format="json"
++    )
++    with pytest.raises(RuntimeError, match="目标不唯一"):
++        server.solidworks_close_documents(params)
++
++
++def test_close_unsaved_rejects_same_title_with_different_type(monkeypatch):
++    first = SimpleNamespace(GetPathName=lambda: "", GetType=lambda: 1, GetTitle=lambda: "A-cut.SLDPRT")
++    second = SimpleNamespace(GetPathName=lambda: "", GetType=lambda: 2, GetTitle=lambda: "A-cut.SLDPRT")
++    app = SimpleNamespace(ActiveDoc=first, GetDocuments=lambda: [first, second])
++    monkeypatch.setattr(server, "connect_solidworks", lambda **_: (app, first), raising=False)
++    monkeypatch.setattr(server, "get_com_member", lambda obj, name, default=None, *args: getattr(obj, name, default)() if callable(getattr(obj, name, None)) else getattr(obj, name, default), raising=False)
++    monkeypatch.setattr(server, "_run_locked", lambda operation, *args, **kwargs: operation())
++    server._document_context = None
++    params = SimpleNamespace(
++        close_all=False, save_changes=False, expected_title="A-cut.SLDPRT",
++        expected_type=1, discard_unsaved=True, response_format="json"
++    )
++
++    with pytest.raises(RuntimeError, match="目标不唯一"):
++        server.solidworks_close_documents(params)
++
++
++@pytest.mark.parametrize("suffix", [".step", ".stp"])
++def test_open_document_rejects_step_formats_before_connecting(monkeypatch, tmp_path, suffix):
++    connect_calls = []
++    monkeypatch.setattr(server, "connect_solidworks", lambda **kwargs: connect_calls.append(kwargs), raising=False)
++    monkeypatch.setattr(server, "_run_locked", lambda operation, *args, **kwargs: operation())
++    params = SimpleNamespace(
++        path=str(tmp_path / f"import{suffix}"),
++        read_only=False,
++        silent=True,
++        configuration=None,
++        response_format="json",
++    )
++
++    with pytest.raises(ValueError, match="only native SolidWorks formats"):
++        server.solidworks_open_document(params)
++
++    assert connect_calls == []
++
++
++def test_open_document_native_part_routes_through_connect_and_open(monkeypatch, tmp_path):
++    source = tmp_path / "native.sldprt"
++    app = SimpleNamespace()
++    opened = SimpleNamespace(
++        GetType=lambda: 1,
++        GetPathName=lambda: str(source),
++    )
++    connect_calls = []
++    open_calls = []
++    monkeypatch.setattr(server, "connect_solidworks", lambda **kwargs: connect_calls.append(kwargs) or (app, None), raising=False)
++    monkeypatch.setattr(server, "open_document", lambda *args, **kwargs: open_calls.append((args, kwargs)) or opened, raising=False)
++    monkeypatch.setattr(server, "get_com_member", lambda obj, name, default=None, *args: getattr(obj, name, default)() if callable(getattr(obj, name, None)) else getattr(obj, name, default), raising=False)
++    monkeypatch.setattr(server, "_bind_document_context", lambda *args, **kwargs: None, raising=False)
++    monkeypatch.setattr(server, "_run_locked", lambda operation, *args, **kwargs: operation())
++    params = SimpleNamespace(
++        path=str(source),
++        read_only=False,
++        silent=True,
++        configuration=None,
++        response_format="json",
++    )
++
++    result = server.solidworks_open_document(params)
++
++    assert result["status"] == "ok"
++    assert len(connect_calls) == 1
++    assert len(open_calls) == 1

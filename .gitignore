@@ -4,3 +4,18 @@
 
 # Also exclude the unprefixed archive directory name
 /doc_tmp/
+
+# Local engineering data, derived caches and private backend configuration
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+/workspaces/
+/local/
+/dist/
+/.test-tmp/
+/.pytest-tmp*/
+/.uv-cache/
+/.agents/skills/eds-*/
+*.sqlite3
+*.sqlite3-*

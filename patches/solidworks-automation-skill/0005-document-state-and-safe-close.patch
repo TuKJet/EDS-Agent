@@ -1,0 +1,226 @@
+diff --git a/mcp-server/server.py b/mcp-server/server.py
+--- a/mcp-server/server.py
++++ b/mcp-server/server.py
+@@ -814,6 +814,12 @@
+     response_format: ResponseFormat = Field(default=ResponseFormat.JSON, description="Return format.")
+ 
+ 
++class SolidWorksInspectDocumentsInput(BaseInput):
++    """Input for inspecting the currently open SolidWorks documents."""
++
++    response_format: ResponseFormat = Field(default=ResponseFormat.JSON, description="Return format.")
++
++
+ class SolidWorksCloseDocumentsInput(BaseInput):
+     """Input for closing SolidWorks documents."""
+ 
+@@ -2917,6 +2923,60 @@
+     return _run_locked(op, params.response_format)
+ 
+ 
++def _inspect_document(model) -> Dict[str, Any]:
++    """Read document identity and save state without changing the active document."""
++    result: Dict[str, Any] = {}
++    for field, member in (("title", "GetTitle"), ("path", "GetPathName"), ("type", "GetType")):
++        try:
++            result[field] = get_com_member(model, member)
++        except Exception as exc:
++            result[field] = None
++            result[f"{field}_error"] = f"读取 {member} 失败: {exc}"
++    try:
++        save_flag = get_com_member(model, "GetSaveFlag")
++        if not isinstance(save_flag, bool):
++            raise TypeError(f"GetSaveFlag 返回非 bool 值: {save_flag!r}")
++        result["needs_save"] = save_flag
++    except Exception as exc:
++        result["needs_save"] = None
++        result["needs_save_error"] = f"读取 GetSaveFlag 失败: {exc}"
++    return result
++
++
++@mcp.tool(
++    name="solidworks_inspect_documents",
++    title="Inspect Open SolidWorks Documents",
++    annotations={
++        "readOnlyHint": True,
++        "destructiveHint": False,
++        "idempotentHint": True,
++        "openWorldHint": False,
++    },
++)
++def solidworks_inspect_documents(params: SolidWorksInspectDocumentsInput = SolidWorksInspectDocumentsInput()) -> str:
++    """Inspect open documents and their save state without activating or modifying them."""
++
++    def op():
++        sw, _model = connect_solidworks(wait_seconds=1)
++        active = get_com_member(sw, "ActiveDoc")
++        try:
++            documents = list(get_com_member(sw, "GetDocuments") or [])
++        except Exception as exc:
++            return {
++                "status": "error",
++                "active_document": _inspect_document(active) if active is not None else None,
++                "documents": [],
++                "documents_error": f"读取 GetDocuments 失败: {exc}",
++            }
++        return {
++            "status": "ok",
++            "active_document": _inspect_document(active) if active is not None else None,
++            "documents": [_inspect_document(document) for document in documents],
++        }
++
++    return _run_locked(op, params.response_format)
++
++
+ @mcp.tool(
+     name="solidworks_close_documents",
+     title="Close SolidWorks Documents",
+@@ -2974,6 +3034,15 @@
+                 same_title.append(str(get_com_member(candidate, "GetPathName", default="") or ""))
+         if path and (sum(bool(item) and Path(item).resolve() == Path(path).resolve() for item in same_title) != 1 or len(same_title) != 1):
+             raise RuntimeError("拒绝关闭：标题不唯一，无法安全解析到完整路径")
++        if path:
++            try:
++                save_flag = get_com_member(model, "GetSaveFlag")
++            except Exception as exc:
++                raise RuntimeError(f"拒绝关闭：无法读取 GetSaveFlag，保存状态未知: {exc}") from exc
++            if not isinstance(save_flag, bool):
++                raise RuntimeError(f"拒绝关闭：GetSaveFlag 返回非 bool，保存状态未知: {save_flag!r}")
++            if save_flag:
++                raise RuntimeError("拒绝关闭：有保存路径的文档存在未保存修改，不自动保存或丢弃")
+         sw.CloseDoc(title)
+         remaining = []
+         for candidate in get_com_member(sw, "GetDocuments", default=[]) or []:
+diff --git a/tests/test_mcp_document_context.py b/tests/test_mcp_document_context.py
+--- a/tests/test_mcp_document_context.py
++++ b/tests/test_mcp_document_context.py
+@@ -57,6 +57,7 @@
+     monkeypatch.setattr(server, "connect_solidworks", lambda **_: (app, first), raising=False)
+     monkeypatch.setattr(server, "get_com_member", lambda obj, name, default=None, *args: getattr(obj, name, default)() if callable(getattr(obj, name, None)) else getattr(obj, name, default), raising=False)
+     monkeypatch.setattr(server, "_run_locked", lambda operation, *args, **kwargs: operation())
++    monkeypatch.setattr(server, "clear_sketch_selection_cache", lambda model=None: None, raising=False)
+     server._document_context = {"path": str(source), "type": 1, "configuration": "Default"}
+     params = SimpleNamespace(close_all=False, save_changes=False, response_format="json")
+     with pytest.raises(RuntimeError, match="标题不唯一"):
+@@ -87,6 +88,121 @@
+     assert app.close_calls == []
+ 
+ 
++@pytest.mark.parametrize("save_flag", [False, True])
++def test_close_saved_document_checks_save_flag(monkeypatch, tmp_path, save_flag):
++    source = tmp_path / "saved.sldprt"
++    first = model(source)
++    first.GetSaveFlag = lambda: save_flag
++    app = SimpleNamespace(ActiveDoc=first, docs=[first], close_calls=[])
++    app.GetDocuments = lambda: list(app.docs)
++    def close_doc(title):
++        app.close_calls.append(title)
++        app.docs = []
++        app.ActiveDoc = None
++    app.CloseDoc = close_doc
++    monkeypatch.setattr(server, "connect_solidworks", lambda **_: (app, first), raising=False)
++    monkeypatch.setattr(server, "get_com_member", lambda obj, name, default=None, *args: getattr(obj, name, default)() if callable(getattr(obj, name, None)) else getattr(obj, name, default), raising=False)
++    monkeypatch.setattr(server, "_run_locked", lambda operation, *args, **kwargs: operation())
++    monkeypatch.setattr(server, "clear_sketch_selection_cache", lambda model=None: None, raising=False)
++    server._document_context = {"path": str(source), "type": 1, "configuration": "Default"}
++    params = SimpleNamespace(close_all=False, save_changes=False, response_format="json")
++
++    if save_flag:
++        with pytest.raises(RuntimeError, match="未保存修改"):
++            server.solidworks_close_documents(params)
++        assert app.close_calls == []
++    else:
++        result = server.solidworks_close_documents(params)
++        assert result == {"status": "ok", "closed": "saved.sldprt"}
++        assert app.close_calls == ["saved.sldprt"]
++
++
++@pytest.mark.parametrize("member", [None, "raises"])
++def test_close_saved_document_rejects_unknown_save_flag(monkeypatch, tmp_path, member):
++    source = tmp_path / "saved.sldprt"
++    first = model(source)
++    if member is None:
++        pass
++    else:
++        first.GetSaveFlag = lambda: (_ for _ in ()).throw(RuntimeError("COM unavailable"))
++    app = SimpleNamespace(ActiveDoc=first, GetDocuments=lambda: [first], close_calls=[])
++    app.CloseDoc = lambda title: app.close_calls.append(title)
++    monkeypatch.setattr(server, "connect_solidworks", lambda **_: (app, first), raising=False)
++    monkeypatch.setattr(server, "get_com_member", lambda obj, name, default=None, *args: getattr(obj, name, default)() if callable(getattr(obj, name, None)) else getattr(obj, name, default), raising=False)
++    monkeypatch.setattr(server, "_run_locked", lambda operation, *args, **kwargs: operation())
++    server._document_context = {"path": str(source), "type": 1, "configuration": "Default"}
++    params = SimpleNamespace(close_all=False, save_changes=False, response_format="json")
++
++    with pytest.raises(RuntimeError, match="保存状态未知"):
++        server.solidworks_close_documents(params)
++    assert app.close_calls == []
++
++
++def test_inspect_documents_is_read_only_and_reports_unknown_save_flag(monkeypatch, tmp_path):
++    source = tmp_path / "saved.sldprt"
++    active = model(source)
++    active.GetSaveFlag = lambda: True
++    unknown = model(tmp_path / "unknown.sldprt")
++    unknown.GetSaveFlag = lambda: (_ for _ in ()).throw(RuntimeError("COM unavailable"))
++    mutations = []
++    app = SimpleNamespace(ActiveDoc=active, GetDocuments=lambda: [active, unknown])
++    for name in ("CloseDoc", "CloseAllDocuments", "ActivateDoc", "Save3"):
++        setattr(app, name, lambda *args, _name=name, **kwargs: mutations.append(_name))
++    monkeypatch.setattr(server, "connect_solidworks", lambda **_: (app, active), raising=False)
++    monkeypatch.setattr(server, "get_com_member", lambda obj, name, default=None, *args: getattr(obj, name, default)() if callable(getattr(obj, name, None)) else getattr(obj, name, default), raising=False)
++    monkeypatch.setattr(server, "_run_locked", lambda operation, *args, **kwargs: operation())
++    params = server.SolidWorksInspectDocumentsInput()
++    assert "response_format" in server.SolidWorksInspectDocumentsInput.model_fields
++    assert "response_format" in server.SolidWorksInspectDocumentsInput.model_json_schema()["properties"]
++    assert params.response_format == server.ResponseFormat.JSON
++    result = server.solidworks_inspect_documents(params)
++
++    assert result["active_document"]["title"] == source.name
++    assert result["active_document"]["path"] == str(source)
++    assert result["active_document"]["type"] == 1
++    assert result["active_document"]["needs_save"] is True
++    assert result["documents"][0]["title"] == source.name
++    assert result["documents"][0]["path"] == str(source)
++    assert result["documents"][0]["type"] == 1
++    assert result["documents"][1]["needs_save"] is None
++    assert "GetSaveFlag" in result["documents"][1]["needs_save_error"]
++    assert mutations == []
++
++
++def test_inspect_documents_does_not_treat_missing_get_documents_as_empty(monkeypatch):
++    app = SimpleNamespace(ActiveDoc=None)
++
++    def faithful_get_com_member(obj, name, default=object(), *args):
++        member = getattr(obj, name)
++        return member() if callable(member) else member
++
++    monkeypatch.setattr(server, "connect_solidworks", lambda **_: (app, None), raising=False)
++    monkeypatch.setattr(server, "get_com_member", faithful_get_com_member, raising=False)
++    monkeypatch.setattr(server, "_run_locked", lambda operation, *args, **kwargs: operation())
++
++    result = server.solidworks_inspect_documents(server.SolidWorksInspectDocumentsInput())
++
++    assert result["status"] == "error"
++    assert result["active_document"] is None
++    assert result["documents"] == []
++    assert "GetDocuments" in result["documents_error"]
++
++
++def test_inspect_documents_reports_missing_active_doc(monkeypatch):
++    app = SimpleNamespace(GetDocuments=lambda: [])
++
++    def faithful_get_com_member(obj, name, default=object(), *args):
++        member = getattr(obj, name)
++        return member() if callable(member) else member
++
++    monkeypatch.setattr(server, "connect_solidworks", lambda **_: (app, None), raising=False)
++    monkeypatch.setattr(server, "get_com_member", faithful_get_com_member, raising=False)
++    monkeypatch.setattr(server, "_run_locked", lambda operation, *args, **kwargs: operation())
++
++    with pytest.raises(AttributeError, match="ActiveDoc"):
++        server.solidworks_inspect_documents(server.SolidWorksInspectDocumentsInput())
++
++
+ def test_close_all_rejects_when_documents_remain_after_close(monkeypatch):
+     remaining = SimpleNamespace()
+     app = SimpleNamespace(
