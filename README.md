@@ -9,6 +9,28 @@ Markdown 知识单元和 SQLite 中英文检索。真实 CAD/CAE 验收需接入
 
 第一次了解这个工程，可先读[设计思路与分层协作](docs/design-overview.md)：其中用架构图、流程图和时序图说明研究闭环、逐级披露、子代理交接、知识分级以及 CAD/CAE 的组合方式。
 
+## 实际运行效果
+
+以下精选图片来自实际 MCP 工作流：一个 SolidWorks 几何候选，以及一组 CAD/CAE 联合热分析的反馈迭代。
+
+**CAD · 原生零件建模**
+
+SolidWorks 独立测试中的三孔候选 B，完成原生几何回读与成果导出。下图为实际零件的等轴预览。
+
+<img src="docs/images/demos/cad-three-hole.png" width="360" alt="SolidWorks 三孔候选 B 的实际等轴预览">
+
+**CAD/CAE · 根据温度反馈迭代设计**
+
+这组热分析使用另一矩形实体。下图从左至右依次为：10 mm / 5 W，最高 **63.64℃**；14 mm / 5 W，最高 **58.13℃**；14 mm / 4 W，最高 **51.68℃**。
+
+<p>
+  <img src="docs/images/demos/thermal-10mm-5w.png" width="240" alt="10 mm 厚度、5 W 热输入的实际温度云图，最高 63.64 摄氏度">
+  <img src="docs/images/demos/thermal-14mm-5w.png" width="240" alt="厚度改为 14 mm、保持 5 W 的实际温度云图，最高 58.13 摄氏度">
+  <img src="docs/images/demos/thermal-14mm-4w.png" width="240" alt="复用 14 mm 几何和网格、功率改为 4 W 的实际温度云图，最高 51.68 摄氏度">
+</p>
+
+厚度由 10 mm 改为 14 mm 后满足预定的 **60℃** 判据；随后只改变热输入，复用几何和网格完成新求解。三张云图使用各自色标，请以上述数值比较。[图片来源、工况与验证范围](docs/demo-gallery.md)
+
 ## 本地使用
 
 需要 Python 3.11+（当前验证环境为 Python 3.14）。EDS 记录与检索核心无第三方运行依赖；实际执行另需所选 Skill 和 MCP 的运行环境。
@@ -133,4 +155,4 @@ python -m eds backend examples/backend.fixture.json check
 开发依据是本地 `doc/` 需求；原目录保持原有 Git 忽略约定。可分发的实现说明在 `docs/`。
 用户工程、原生文件、实际知识和私密后端配置应保存在独立工作区；`workspaces/` 和 `local/` 已忽略。
 历史验证报告中的 `workspaces/` 成果与原始日志链接指向本地留存证据，不随 GitHub 仓库分发；
-公开仓库保留验证摘要、测试及合成示例，可按上面的命令进行本地功能验证。
+公开仓库保留验证摘要、精选演示图片、测试及合成示例，可按上面的命令进行本地功能验证。
