@@ -9,6 +9,8 @@ Markdown 知识单元和 SQLite 中英文检索。真实 CAD/CAE 验收需接入
 
 第一次了解这个工程，可先读[设计思路与分层协作](docs/design-overview.md)：其中用架构图、流程图和时序图说明研究闭环、逐级披露、子代理交接、知识分级以及 CAD/CAE 的组合方式。
 
+也可查看 [架构设计与 RSI 演示文稿](EDS-Agent_架构设计与RSI.pptx)（17 页）。
+
 ## 实际运行效果
 
 以下精选图片来自实际 MCP 工作流：一个 SolidWorks 几何候选，以及一组 CAD/CAE 联合热分析的反馈迭代。
@@ -154,5 +156,6 @@ python -m eds backend examples/backend.fixture.json check
 
 开发依据是本地 `doc/` 需求；原目录保持原有 Git 忽略约定。可分发的实现说明在 `docs/`。
 用户工程、原生文件、实际知识和私密后端配置应保存在独立工作区；`workspaces/` 和 `local/` 已忽略。
+`output/` 保存本地产物，不随仓库上传；演示文稿的发布版单独保存在根目录。
 历史验证报告中的 `workspaces/` 成果与原始日志链接指向本地留存证据，不随 GitHub 仓库分发；
 公开仓库保留验证摘要、精选演示图片、测试及合成示例，可按上面的命令进行本地功能验证。

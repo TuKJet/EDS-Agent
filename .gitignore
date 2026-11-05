@@ -12,6 +12,7 @@ __pycache__/
 .pytest_cache/
 /workspaces/
 /local/
+/output/
 /dist/
 /.test-tmp/
 /.pytest-tmp*/
@@ -19,3 +20,6 @@ __pycache__/
 /.agents/skills/eds-*/
 *.sqlite3
 *.sqlite3-*
+
+# Local API credentials
+/.local/
