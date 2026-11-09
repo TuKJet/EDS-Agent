@@ -4,6 +4,12 @@
 `study.json`；它不决定研究路线、不调用模型、不提交 MCP 请求。
 以下为 `eds-study/v1` 的实际接口。Python 要求 3.11+，不需要第三方依赖。
 
+每个形成 `assessment` 的迭代都可以发布到个人数据根的中央知识库，形成带固定版本和来源哈希的
+`feedback` 投影。它包含条件、方法或路线、预期与实际、失败、修复、验证和适用范围；`study.json`
+仍然保留完整原始事实。该投影用于后续经验检索，不要求模型再次遍历历史项目目录。没有 Run 的
+论文方法评估也可以发布，但必须区分 literature claim、Codex inference 和 unverified，不能把
+文献结果写成当前产品已验证改善。
+
 ## 便携 Study 存放
 
 启用统一个人数据根目录后，新的 Study 可放在 `studies/<name>/`，并通过

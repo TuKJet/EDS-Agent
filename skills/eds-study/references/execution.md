@@ -85,6 +85,10 @@ the Study owner; do not create duplicate Runs for the same remote action.
    A completed observation explicitly bound as `read_only: true` may be repeated
    as a fresh Run. A confirmed unsent preflight failure may be retried after repair;
    retain its failed record. Neither case enables automatic retries.
+   When choosing or repairing a route, query central feedback with
+   `execution-guidance` or `failure-recovery`. Read the fixed version and
+   compare conditions before changing the brief; reuse one selected guidance
+   snapshot for the current Run instead of searching for every tool call.
    The default `resume` shows task identities and state without raw output. Use
    `show --run <run-id>` to inspect the assigned Run's exact inputs and history;
    do not load the whole Study to recover one task.
@@ -111,5 +115,8 @@ Return a short result with these fields; files hold the full supporting detail:
 Do not return complete tool lists, schemas, manuals or routine logs. The owner can
 request a specific evidence slice or an independent check if interpretation needs
 it. Compression must retain failed checks, unknown status and model differences.
+Write the Assessment after this review and publish the iteration projection to
+the bound central knowledge root. Publication preserves Run status and never
+upgrades an unknown or failed operation into a successful engineering conclusion.
 Write the Assessment after this review; begin the next iteration from the updated
 Study summary instead of replaying the execution transcript.

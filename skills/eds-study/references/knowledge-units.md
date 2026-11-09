@@ -15,10 +15,26 @@ it; a paper chapter or chat turn is not automatically a knowledge unit.
 | `feedback` | Actual experiment/Run versions, realized conditions, quality checks, observations, uncertainty, failures and applicability | Solver success, numerical quality and engineering adequacy |
 | `preference` | Specific convention, owner/scope, explicit source and status | Personal choice versus technical requirements; see [preferences](preferences.md) |
 
+Project iterations are published into the central personal knowledge root as
+versioned `feedback` projections. This is a provenance rule, not a new logical
+collection: the Study remains the source record, while the projection keeps
+conditions, route, expected-versus-actual observations, failure/repair,
+validation and reuse outcome. Future retrieval, n-gram/PLE or small-model
+exports can therefore be added without rewriting every Study.
+
+Method evaluations are equally valuable to tool-execution feedback. Preserve
+the paper or method versions, product feature and operating conditions, parameter
+change, baseline/candidate metrics, and one of `improved`, `degraded`, `no_change`
+or `unverified`. A literature-only assessment remains unverified for the product;
+it may guide a candidate experiment but cannot become a verified improvement.
+
 When one source contains several kinds of knowledge, create linked units rather
 than putting every kind into one summary. Link a method to its experiment and
 feedback by fixed versions. Preserve negative and inconclusive outcomes. The
 current task's original records are not replaced by reusable knowledge extraction.
+An iteration projection is created after an Assessment, including failed and
+inconclusive iterations. Pending or unknown Runs remain inconclusive and cannot
+be promoted to verified success.
 
 ## Markdown and provenance
 
@@ -45,6 +61,11 @@ locators. Relations use stable id/version pairs: `uses`, `tested_by`, `supports`
 `limits`, `contradicts`, `supersedes`, or `derived_from`. Relations are not automatic
 instructions to load other bodies. Changed meaning, evidence or applicability
 creates an explicit revision; do not overwrite cited historical versions.
+
+For iteration feedback, preserve observed facts, Codex interpretation and
+reusable guidance as separate parts. A repair suggestion without a supporting
+validation reference remains unverified; a source or hash alone does not prove
+engineering adequacy.
 
 Legacy method/experiment/feedback and custom-type units remain readable. The
 tool validates the common metadata and the preference-specific contract; Codex

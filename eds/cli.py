@@ -78,6 +78,15 @@ def parser():
     for name in ("context", "metrics", "extraction"):
         action = actions.add_parser(name)
         action.add_argument("--data", required=True)
+    experience_bind = actions.add_parser("experience-bind", help="Send future iteration assessments to a central library")
+    experience_bind.add_argument("--knowledge-root", default="@knowledge")
+    experience_publish = actions.add_parser("experience-publish", help="Publish or retry preserved iteration records")
+    experience_publish.add_argument("--assessment", help="Fixed assessment reference; omitted publishes all")
+    experience_publish.add_argument("--knowledge-root", help="Default: managed or bound central knowledge root")
+    experience_backfill = actions.add_parser("experience-backfill", help="Copy historical assessments centrally without modifying the Study")
+    experience_backfill.add_argument("--assessment", help="Fixed assessment reference; omitted copies all")
+    experience_backfill.add_argument("--knowledge-root", help="Default: managed or bound central knowledge root")
+    actions.add_parser("experience-status", help="Show pending central experience publications")
     kb = commands.add_parser("kb", help="Explicit Markdown knowledge registration and retrieval")
     kb.add_argument("root", help="Independent knowledge workspace or @knowledge")
     actions = kb.add_subparsers(dest="action", required=True)
@@ -203,6 +212,14 @@ def dispatch(args):
             return store.set_metrics(**read_json(args.data))
         if args.action == "extraction":
             return store.record_extraction(**read_json(args.data))
+        if args.action == "experience-bind":
+            return store.bind_experience(args.knowledge_root)
+        if args.action == "experience-publish":
+            return store.publish_experiences(assessment_ref=args.assessment, knowledge_root=args.knowledge_root)
+        if args.action == "experience-backfill":
+            return store.backfill_experiences(assessment_ref=args.assessment, knowledge_root=args.knowledge_root)
+        if args.action == "experience-status":
+            return store.experience_status()
     if args.command == "kb":
         if args.action == "route":
             return knowledge_route(question=args.question, stage=args.stage)

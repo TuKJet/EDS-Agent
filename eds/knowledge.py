@@ -27,6 +27,7 @@ WORD_RE = re.compile(r"[A-Za-z0-9_]+|[\u0370-\u03ff]+")
 KNOWLEDGE_QUESTIONS = {
     "design", "method-selection", "experiment-design", "result-interpretation",
     "cad-modeling", "drawing", "delivery",
+    "execution-guidance", "failure-recovery",
 }
 KNOWLEDGE_STAGES = {"discussion", "planning", "execution", "interpretation", "delivery"}
 PREFERENCE_SCOPES = {"user", "team", "project"}
@@ -808,16 +809,18 @@ class KnowledgeBase:
         by_question = {
             "design": ["design", "feedback"],
             "method-selection": ["method", "feedback"],
-            "experiment-design": ["experiment", "method"],
+            "experiment-design": ["experiment", "method", "feedback"],
             "result-interpretation": ["feedback", "method"],
             "cad-modeling": ["design", "preference", "feedback"],
             "drawing": ["preference", "design", "feedback"],
             "delivery": ["preference", "feedback", "design"],
+            "execution-guidance": ["feedback", "method", "design", "preference"],
+            "failure-recovery": ["feedback", "method", "experiment"],
         }
         by_stage = {
             "discussion": ["design", "method"],
             "planning": ["experiment", "method"],
-            "execution": ["preference", "design"],
+            "execution": ["feedback", "method", "design", "preference"],
             "interpretation": ["feedback", "method"],
             "delivery": ["preference", "feedback"],
         }

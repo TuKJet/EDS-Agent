@@ -24,12 +24,28 @@ question is not yet specific. These are retrieval routes, not evidence rankings:
 | `cad-modeling` | `design` | scoped `preference`, relevant `feedback` |
 | `drawing` | scoped `preference` | `design`, relevant `feedback` |
 | `delivery` | scoped `preference` | `feedback`, `design` |
+| `execution-guidance` | `feedback` | `method`, `design`, scoped `preference` |
+| `failure-recovery` | `feedback` | `method`, `design` |
+
+Method-selection, experiment-design and result-interpretation use the same
+central feedback history. A method evaluation may have literature Evidence and
+an Assessment before any Run exists. Keep literature claim, Codex inference and
+runtime observation separate; a paper discussion cannot be labelled as a
+verified product improvement until a suitable experiment exists.
 
 `--stage` accepts `discussion`, `planning`, `execution`, `interpretation`, or
 `delivery`. Do not use a stage to override a more specific question. Use `--domain`
 and `--project` when applicable, and `--user`/`--team` only for the actual identity.
 An explicit `--type` selects a collection for a deliberate follow-up. Missing
 identity is not permission to search every person's preferences.
+
+During execution planning or route changes, `execution-guidance` and
+`failure-recovery` search central iteration feedback. Read the fixed version and
+compare conditions before changing the brief; reuse one selected guidance
+snapshot for the current Run instead of searching again for every tool call.
+The result is a conditional candidate route or method applicability judgment. The Codex owner records adopted,
+limited or rejected use and the actual outcome; a lexical match never directly
+changes an MCP call.
 
 ```powershell
 python -m eds kb <knowledge-root> route --question method-selection --stage planning
@@ -83,3 +99,5 @@ Only when managing/applying personal or team conventions, read
 [engineering preferences](preferences.md). Preference extraction settings
 `once/auto/later/skip` are separate from engineering preferences. Basic Study/Run/
 Evidence/Assessment records remain mandatory regardless of optional extraction.
+Every material iteration is also retained in central feedback; extraction
+settings only control additional high-level curation.

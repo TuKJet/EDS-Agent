@@ -38,6 +38,7 @@ The references below are conditional routes, not a startup reading list.
 | Resolve a specific methodological gap | The matching section of repository-root `docs/methods.md`; skip unrelated examples. |
 | Create/update records or resume a run | The relevant section of `docs/record-format.md`: current state, entities, Run, evidence, or method-use. Use `python -m eds --help` for the actual operation. |
 | Search history | [Knowledge routing](references/knowledge.md): select by current question, then stage; read selected units before expanding relevant relations. |
+| Choose or repair an execution route | Search `execution-guidance` or `failure-recovery`; compare conditions and read the fixed feedback version before changing the brief. |
 | Extract or revise reusable knowledge | [Unit contracts](references/knowledge-units.md), only when requested or configured. Personal conventions use the separate preference contract. |
 | Execute a recorded experiment | The execution owner reads [execution handoff](references/execution.md); healthy MCP calls use runtime task references, installation/troubleshooting is a separate conditional route. |
 
@@ -73,3 +74,13 @@ Keep basic Study/Run/evidence records regardless of optional experience extracti
 (`once`, `auto`, `later`, `skip`). Record material method use with version, reason,
 affected refs and outcome. Finish or hand off with the current conclusion, evidence,
 applicability, gaps and next action or evidence-based stop reason.
+
+Every substantial iteration or method evaluation that reaches an Assessment is
+also published as a versioned central feedback projection. This includes
+paper-method applicability and parameter discussions, not only tool execution.
+Use `experience-status` and `experience-publish` to reconcile pending
+publications; later executors should not traverse old project directories.
+Failed, inconclusive and literature-only evaluations remain searchable with
+their status and limits. The central record is model-independent source material
+for future retrieval, n-gram/PLE projections or small-model training; it does
+not contain weights or automatically execute a route.

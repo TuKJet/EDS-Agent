@@ -19,6 +19,10 @@ The manifest records only the schema, stable identity, and relative
 Markdown and `registry.json`, `study.json`, preset state and deliberately
 selected attachments. SQLite indexes, lock files, temporary files, credentials,
 backend bindings and VM-specific absolute paths are local or rebuildable.
+For managed Studies, `knowledge/iterations/` is the central, searchable
+experience projection. It keeps fixed Study/Run/evidence references and hashes,
+so later work need not walk old project folders; the Study remains the original
+engineering record.
 Each data directory includes `.gitkeep` so even initially empty directories
 survive a private Git checkout.
 The local binding is `~/.eds/config.json`; caches and process locks default to

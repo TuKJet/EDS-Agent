@@ -14,13 +14,15 @@ import os
 import tempfile
 import time
 import uuid
+import warnings
+import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
 from .presets import validate_snapshot
-from .personal_data import managed_cache_root, resolve_alias
+from .personal_data import managed_cache_root, managed_data_root, resolve_alias
 
 
 class StudyError(ValueError):
@@ -441,6 +443,16 @@ class StudyStore:
                     raise StudyError("duplicate extraction event key")
                 cls._unit_refs(event.get("unit_refs"))
                 extraction_keys.add(key)
+            if event["type"] == "experience_publication":
+                _text(event.get("publication_id"), "publication_id")
+                _text(event.get("knowledge_root"), "knowledge_root")
+                assessment = entities.get(event.get("assessment_ref"))
+                if assessment is None or assessment["kind"] != "assessment":
+                    raise StudyError("experience publication requires a fixed assessment")
+                if event.get("status") not in {"pending", "failed", "published"}:
+                    raise StudyError("invalid experience publication status")
+                if event["status"] == "pending" and not isinstance(event.get("record"), dict):
+                    raise StudyError("pending experience publication requires its frozen record")
 
     @staticmethod
     def _validate_history(run: dict[str, Any]) -> None:
@@ -515,8 +527,159 @@ class StudyStore:
                       "version": version + 1, "kind": kind, "created_at": _now(),
                       "payload": self._freeze_payload(state, payload)}
             state["entities"].append(entity)
+            target = self._experience_target(state) if kind == "assessment" else None
+            if target:
+                self._queue_experience(state, entity["ref"], target)
             self._write(state)
-            return copy.deepcopy(entity)
+        if target:
+            try:
+                result = self.publish_experiences(assessment_ref=entity["ref"], knowledge_root=target)
+                pending = bool(result["pending_count"])
+            except (OSError, ValueError, sqlite3.Error):
+                # The assessment and frozen pending record were committed first.
+                # A failed acknowledgement must not suggest repeating a CAD/CAE action.
+                pending = True
+            if pending:
+                warnings.warn("Assessment saved; central experience publication is pending. "
+                              "Use experience-status / experience-publish to inspect and retry.", RuntimeWarning)
+        return copy.deepcopy(entity)
+
+    def _experience_target(self, state):
+        bound = state["context"].get("experience_knowledge")
+        if bound is not None:
+            return _text(bound, "experience_knowledge")
+        root = managed_data_root(self.root)
+        if root is not None and self.root.is_relative_to(root / "studies"):
+            return "@managed"
+        return None
+
+    def _experience_root(self, target):
+        if target == "@managed":
+            root = managed_data_root(self.root)
+            if root is None:
+                raise StudyError("managed experience root is missing; rebind this Study")
+            return root / "knowledge"
+        return resolve_alias(target)
+
+    @staticmethod
+    def _publication_states(state):
+        latest = {}
+        for event in state["events"]:
+            if event["type"] == "experience_publication":
+                latest[event["publication_id"]] = event
+        return latest
+
+    @classmethod
+    def _publication_summary(cls, state):
+        latest = cls._publication_states(state)
+        pending = [event for event in latest.values() if event["status"] != "published"]
+        return {"published_count": len(latest) - len(pending), "pending_count": len(pending),
+                "pending": [{key: event.get(key) for key in ("assessment_ref", "status", "error")}
+                            for event in pending[:10]]}
+
+    def experience_status(self):
+        state = self._read()
+        return {"knowledge_root": self._experience_target(state), **self._publication_summary(state)}
+
+    def bind_experience(self, knowledge_root="@knowledge"):
+        from .experience import experience_library
+        _text(knowledge_root, "knowledge_root")
+        experience_library(self._experience_root(knowledge_root))
+        self.update_context(experience_knowledge=knowledge_root)
+        return self.experience_status()
+
+    @staticmethod
+    def _queue_experience(state, assessment_ref, target):
+        from .experience import build_iteration
+        key = hashlib.sha256(_canonical([state["study_id"], assessment_ref, target]).encode()).hexdigest()
+        existing = next((event for event in state["events"] if event["type"] == "experience_publication"
+                         and event["publication_id"] == key and event["status"] == "pending"), None)
+        if existing is not None:
+            return existing
+        try:
+            record = build_iteration(state, assessment_ref)
+        except (ValueError, TypeError, KeyError) as exc:
+            # Optional experience formatting cannot discard an engineering assessment.
+            latest = StudyStore._publication_states(state).get(key)
+            if latest and latest.get("build_error") == str(exc):
+                return latest
+            assessment = next(item for item in state["entities"] if item["ref"] == assessment_ref)
+            return StudyStore._event(state, "experience_publication", publication_id=key,
+                                     assessment_ref=assessment_ref, knowledge_root=target, status="failed",
+                                     error="Experience materialization failed: " + str(exc), build_error=str(exc),
+                                     assessment_snapshot=assessment)
+        return StudyStore._event(state, "experience_publication", publication_id=key,
+                                 assessment_ref=assessment_ref, knowledge_root=target, status="pending",
+                                 record=record)
+
+    def publish_experiences(self, *, assessment_ref=None, knowledge_root=None):
+        """Publish frozen iteration records; a failure never rewinds an executed Run."""
+        from .experience import publish_iteration
+        with self._lock():
+            state = self._read()
+            target = knowledge_root or self._experience_target(state) or "@knowledge"
+            selected = ([self._resolve(state, assessment_ref, "assessment")] if assessment_ref else
+                        [entity for entity in state["entities"] if entity["kind"] == "assessment"])
+            old_count = len(state["events"])
+            queued = [self._queue_experience(state, entity["ref"], target) for entity in selected]
+            if len(state["events"]) != old_count:
+                self._write(state)
+            latest = self._publication_states(state)
+        results = []
+        for pending in queued:
+            key = pending["publication_id"]
+            if "record" not in pending:
+                results.append({"status": "failed", "error": pending["error"]})
+                continue
+            if latest[key]["status"] == "published":
+                results.append(copy.deepcopy(latest[key].get("result", {})))
+                continue
+            try:
+                result = publish_iteration(self._experience_root(target), pending["record"])
+                if not result.get("indexed"):
+                    raise StudyError("central source saved but index is incomplete")
+                outcome = {"status": "published", "result": result}
+            except (OSError, ValueError, sqlite3.Error) as exc:
+                outcome = {"status": "failed", "error": str(exc)}
+            with self._lock():
+                state = self._read()
+                current = self._publication_states(state).get(key)
+                # Another publisher may have completed the same immutable record.
+                repeated_failure = (current is not None and current["status"] == "failed"
+                                    and outcome["status"] == "failed" and current.get("error") == outcome["error"])
+                if (current is None or current["status"] != "published") and not repeated_failure:
+                    self._event(state, "experience_publication", publication_id=key,
+                                assessment_ref=pending["assessment_ref"], knowledge_root=target, **outcome)
+                    self._write(state)
+                results.append(copy.deepcopy(self._publication_states(state)[key].get("result", outcome)))
+        return {"results": results, **self._publication_summary(self._read())}
+
+    def backfill_experiences(self, *, assessment_ref=None, knowledge_root=None):
+        """Publish historical assessments without adding an outbox to the source Study."""
+        from .experience import build_iteration, experience_library, publish_iteration
+        state = self._read()
+        target = knowledge_root or self._experience_target(state) or "@knowledge"
+        root = experience_library(self._experience_root(target)).root
+        selected = ([self._resolve(state, assessment_ref, "assessment")] if assessment_ref else
+                    [entity for entity in state["entities"] if entity["kind"] == "assessment"])
+        # Honor an existing outbox snapshot if publication previously failed.
+        frozen = {event["assessment_ref"]: event["record"] for event in state["events"]
+                  if event["type"] == "experience_publication" and event.get("status") == "pending"}
+        results = []
+        for assessment in selected:
+            try:
+                record = frozen.get(assessment["ref"])
+                if record is None:
+                    record = build_iteration(state, assessment["ref"])
+                result = publish_iteration(root, record)
+                if not result.get("indexed"):
+                    raise StudyError("central source saved but index is incomplete")
+                results.append({"assessment_ref": assessment["ref"], "status": "published", **result})
+            except (OSError, ValueError, TypeError, KeyError, sqlite3.Error) as exc:
+                results.append({"assessment_ref": assessment["ref"], "status": "failed", "error": str(exc)})
+        published = sum(item["status"] == "published" for item in results)
+        return {"knowledge_root": str(root), "tracking": "central_only", "results": results,
+                "published_count": published, "failed_count": len(results) - published}
 
     def add_run(self, *, experiment_ref: str, input_refs: list[str], backend: str,
                 capability: str, input_snapshot: dict[str, Any], idempotency_key: str,
@@ -770,7 +933,8 @@ class StudyStore:
                     "latest_decision": next((copy.deepcopy(entity) for entity in reversed(state["entities"]) if entity["kind"] == "decision"), None),
                     "pending_runs": pending, "query_before_submit": query, "query_before_resubmit": query,
                     "ready_to_submit": [run["run_id"] for run in pending if run["status"] == "planned"],
-                    "next_step": state["context"].get("next_step"), "metrics": self._metrics(state)}
+                    "next_step": state["context"].get("next_step"), "metrics": self._metrics(state),
+                    "experience_publication": self._publication_summary(state)}
 
         current = {entity["logical_ref"]: self._entity_descriptor(entity) for entity in state["entities"]}
         pending = [self._run_summary(run) for run in state["runs"] if run["status"] not in TERMINAL]
@@ -786,7 +950,8 @@ class StudyStore:
                 "omitted_context_keys": omitted, "latest_assessment": latest_assessment, "latest_decision": latest_decision,
                 "pending_runs": pending, "query_before_submit": query, "query_before_resubmit": query,
                 "ready_to_submit": [run["run_id"] for run in pending if run["status"] == "planned"],
-                "failed_runs": failed, "next_step": state["context"].get("next_step"), "metrics": self._metrics(state)}
+                "failed_runs": failed, "next_step": state["context"].get("next_step"), "metrics": self._metrics(state),
+                "experience_publication": self._publication_summary(state)}
 
     @staticmethod
     def _dependencies(payload: dict[str, Any]) -> set[str]:

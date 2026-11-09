@@ -207,34 +207,37 @@ def resolve_alias(value: str | os.PathLike[str], root: str | os.PathLike[str] | 
     raise PersonalDataError(f"unknown personal data alias: {text}")
 
 
-def managed_cache_root(path: str | os.PathLike[str]) -> Path | None:
-    """Return a machine-local cache path for a path inside a valid data root."""
+def managed_data_root(path: str | os.PathLike[str]) -> Path | None:
+    """Find the containing portable root without scanning other directories."""
     target = Path(path).expanduser().resolve()
     current = target if target.is_dir() else target.parent
     while True:
-        manifest_path = current / "eds-data.json"
-        if manifest_path.is_file():
+        if (current / "eds-data.json").is_file():
             _manifest(current)
-            relative = target.relative_to(current).as_posix() if target != current else "."
-            token = hashlib.sha256((str(current) + "\0" + relative).encode("utf-8")).hexdigest()[:24]
-            cache_base = os.environ.get("EDS_CACHE_HOME")
-            if cache_base:
-                base = Path(cache_base).expanduser().resolve()
-            else:
-                # Some desktop launchers redirect LOCALAPPDATA per process.
-                # A stable home path keeps processes for this user on one lock.
-                base = Path.home() / ".eds" / "cache"
-            base = base.expanduser().resolve()
-            if base == current or current in base.parents:
-                raise PersonalDataError("machine cache must be outside the synchronized data root")
-            result = base / token
-            if result.resolve().is_relative_to(current):
-                raise PersonalDataError("existing machine cache link points into the synchronized data root")
-            return result
+            return current
         if current.parent == current:
             break
         current = current.parent
     return None
+
+
+def managed_cache_root(path: str | os.PathLike[str]) -> Path | None:
+    """Return a machine-local cache path for a path inside a valid data root."""
+    target = Path(path).expanduser().resolve()
+    current = managed_data_root(target)
+    if current is None:
+        return None
+    relative = target.relative_to(current).as_posix() if target != current else "."
+    token = hashlib.sha256((str(current) + "\0" + relative).encode("utf-8")).hexdigest()[:24]
+    cache_base = os.environ.get("EDS_CACHE_HOME")
+    # Some desktop launchers redirect LOCALAPPDATA per process. Keep one lock.
+    base = (Path(cache_base) if cache_base else Path.home() / ".eds" / "cache").expanduser().resolve()
+    if base == current or current in base.parents:
+        raise PersonalDataError("machine cache must be outside the synchronized data root")
+    result = base / token
+    if result.resolve().is_relative_to(current):
+        raise PersonalDataError("existing machine cache link points into the synchronized data root")
+    return result
 
 
 # Explicit names used by the command-line data root entrypoint. The shorter
@@ -244,5 +247,5 @@ use_data = use
 data_status = status
 
 
-__all__ = ["PersonalDataError", "SCHEMA", "get_paths", "init", "init_data", "managed_cache_root",
+__all__ = ["PersonalDataError", "SCHEMA", "get_paths", "init", "init_data", "managed_cache_root", "managed_data_root",
            "resolve_alias", "status", "data_status", "use", "use_data"]
