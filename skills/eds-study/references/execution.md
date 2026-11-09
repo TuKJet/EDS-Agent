@@ -1,5 +1,16 @@
 # Bounded execution handoff
 
+## Activity preset handoff
+
+If an activity preset is selected, include its fixed task snapshot in the task
+brief: preset name, context, revision/hash, source preference refs, effective
+values, and task overrides. Do not re-run knowledge search during each Run;
+record the snapshot in the Run input so a batch remains reproducible. Map style
+values only to fields supported by the selected vendor `DrawingSpec`. Return
+applied and unmapped settings separately. Units, projection, true dimensions,
+associativity and required manufacturing information remain engineering
+constraints and cannot be overridden by personal style.
+
 Read this only when preparing concrete execution, reconciling an existing run,
 or answering an explicit setup/capability/troubleshooting request. The Study owner
 can execute a small action directly. For substantial vendor-specific work, use an

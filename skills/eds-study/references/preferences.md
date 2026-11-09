@@ -55,3 +55,25 @@ within the search limit through bounded `conflict_refs`; read those versions.
 Scoped search is retrieval hygiene, not filesystem access control. An explicit
 fixed-id read can inspect a selected unit, including candidates for review.
 Knowledge that requires access isolation belongs in separately authorized roots.
+
+## Activity presets and execution snapshots
+
+High-frequency execution must not search the knowledge index for every artifact.
+An activity preset is a named selection of fixed preference references plus a
+derived settings map. Preference units remain the only long-term source; the
+preset is a reusable execution cache, not a second preference store.
+
+Activate a preset once for a context identified by the applicable user, team or
+project together with the domain and question (and, when needed, stage). Resolve
+and validate fixed `id@version` references at activation time, then reuse the
+resulting snapshot. `current` and subsequent task creation read only that saved
+snapshot: they do not run n-gram search, create a preference unit, or widen scope.
+
+A task overlay is local to the current task or Run and never changes the preset.
+A batch of drawings pins one task snapshot so all parts use the same version. A
+later preset revision affects new tasks only.
+
+`save-default` is the explicit persistence action. It creates confirmed explicit
+preference revisions only for changed settings, with the selected scope and a
+source locator. A no-op creates no new version. This is separate from `study
+preferences`, which controls extraction timing rather than drawing style.

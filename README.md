@@ -128,6 +128,14 @@ SQLite 为可重建派生数据；库不可用时 Codex 可继续使用当前工
 它与 `once/auto/later/skip` 抽取频率不同。完整说明见[知识路由](skills/eds-study/references/knowledge.md)、
 [分类纳管](skills/eds-study/references/knowledge-units.md)及[偏好管理](skills/eds-study/references/preferences.md)。
 
+高频工程图执行使用活动预设减少重复检索：首次激活时固定适用的偏好版本，
+后续任务直接使用预设快照；任务内覆盖只保存在当前 Run，只有显式保存为默认
+才创建新的偏好版本。典型入口为 `python -m eds preset <knowledge-root>
+activate|current|task|save-default`，再把 task 快照随 Run 输入传给执行端。
+执行端只把快照映射到其支持的 DrawingSpec 字段，并报告已应用和未映射项；
+个人风格不会写入公共 Skill，工程硬约束也不会被快照覆盖。
+具体命令、快照字段和首次激活约束见[活动预设说明](docs/execution-presets.md)。
+
 ## 验证与执行接入
 
 ```powershell

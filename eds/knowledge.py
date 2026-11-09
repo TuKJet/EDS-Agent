@@ -380,23 +380,43 @@ class KnowledgeBase:
         return counts
 
     def register(self, path: str | os.PathLike[str]) -> dict[str, Any]:
-        relative = self._relative(path)
+        return self.register_many([path])[0]
+
+    def register_many(self, paths: list[str | os.PathLike[str]]) -> list[dict[str, Any]]:
+        """Validate a complete batch before changing the registry or index."""
+        if not isinstance(paths, list) or not paths:
+            raise KnowledgeError("register_many requires a nonempty path array")
+        relatives = [self._relative(path) for path in paths]
+        if len(set(relatives)) != len(relatives):
+            raise KnowledgeError("duplicate registration paths")
         with self._lock():
-            paths = self._read_registry()
-            candidate = sorted(set(paths) | {relative})
+            registered_paths = self._read_registry()
+            candidate = sorted(set(registered_paths) | set(relatives))
             docs, missing = self._documents(candidate)
-            if relative in missing:
-                raise KnowledgeError(f"cannot register missing Markdown: {relative}")
+            if any(relative in missing for relative in relatives):
+                raise KnowledgeError("cannot register missing Markdown in batch")
             # Validation, including identities and relation shapes, precedes mutation.
-            if candidate != paths or not self.registry_path.exists():
+            if candidate != registered_paths or not self.registry_path.exists():
                 self._write_registry(candidate)
             try:
                 self._sync(candidate, docs, missing)
             except (OSError, sqlite3.DatabaseError) as exc:
                 raise KnowledgeError(f"document saved and registered, but index failed: {exc}") from exc
             health = self.status()
-            return {**docs[relative]["metadata"], "path": relative, "saved": True, "registered": True,
-                    "indexed": health["consistent"], "index_status": health}
+            return [{**docs[relative]["metadata"], "path": relative, "saved": True, "registered": True,
+                     "indexed": health["consistent"], "index_status": health} for relative in relatives]
+
+    def preference_catalog(self) -> list[dict[str, Any]]:
+        """Explicit low-frequency enumeration, with supersession; no lexical search."""
+        self._light_health(check_sources=True)
+        with closing(self._connect(readonly=True)) as connection:
+            connection.execute("BEGIN")
+            rows = list(connection.execute("SELECT * FROM units WHERE type='preference'"))
+            superseded = self._superseded_preferences(rows)
+            units = [{**self._unit(row), "superseded": (row["id"], row["version"]) in superseded}
+                     for row in rows]
+        self._verify_returned(units)
+        return units
 
     def unregister(self, path: str | os.PathLike[str]) -> dict[str, Any]:
         relative = self._relative(path)

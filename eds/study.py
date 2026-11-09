@@ -19,9 +19,25 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
+from .presets import validate_snapshot
+
 
 class StudyError(ValueError):
     """A malformed record, missing reference, or invalid state transition."""
+
+
+def _validate_run_preset(snapshot: dict[str, Any], mode: str) -> None:
+    if "execution_preset" not in snapshot:
+        return
+    preset = snapshot["execution_preset"]
+    try:
+        validate_snapshot(preset)
+    except (ValueError, TypeError) as exc:
+        raise StudyError(f"invalid execution preset: {exc}") from exc
+    if preset.get("format") != "eds-task-preset/v1":
+        raise StudyError("Run requires a pinned task preset, not a mutable active selection")
+    if mode != "coupled" and preset["context"]["domain"] != mode:
+        raise StudyError("execution preset domain differs from the Study mode")
 
 
 KINDS = {"design", "proposal", "realization", "experiment", "evidence", "assessment", "mapping", "decision"}
@@ -386,6 +402,7 @@ class StudyStore:
                 raise StudyError("run input_refs must reference pinned entities")
             if not isinstance(run.get("input_snapshot"), dict):
                 raise StudyError("run input_snapshot must be an object")
+            _validate_run_preset(run["input_snapshot"], state["mode"])
             for field in ("created_at", "updated_at"):
                 _timestamp(run.get(field), f"run.{field}")
             cls._validate_history(run)
@@ -501,16 +518,23 @@ class StudyStore:
 
     def add_run(self, *, experiment_ref: str, input_refs: list[str], backend: str,
                 capability: str, input_snapshot: dict[str, Any], idempotency_key: str,
-                task_id: str | None = None) -> dict[str, Any]:
+                task_id: str | None = None,
+                execution_preset: dict[str, Any] | None = None) -> dict[str, Any]:
         for field, value in (("backend", backend), ("capability", capability), ("idempotency_key", idempotency_key)):
             _text(value, field)
         if task_id is not None:
             _text(task_id, "task_id")
         if not isinstance(input_refs, list) or not isinstance(input_snapshot, dict):
             raise StudyError("input_refs must be a list and input_snapshot an object")
+        input_snapshot = copy.deepcopy(input_snapshot)
+        if execution_preset is not None:
+            if "execution_preset" in input_snapshot:
+                raise StudyError("execution preset supplied twice")
+            input_snapshot["execution_preset"] = copy.deepcopy(execution_preset)
         _json_value(input_snapshot)
         with self._lock():
             state = self._read()
+            _validate_run_preset(input_snapshot, state["mode"])
             request = {"experiment_ref": self._resolve(state, experiment_ref, "experiment")["ref"],
                        "input_refs": [self._resolve(state, item)["ref"] for item in input_refs],
                        "backend": backend, "capability": capability, "input_snapshot": copy.deepcopy(input_snapshot),

@@ -15,6 +15,7 @@ from .backends import check_binding, load_binding, normalize_status, prepare_cal
 from .install import REPO_ROOT, install_skills
 from .execution import readiness
 from .knowledge import KnowledgeBase, knowledge_route
+from .presets import PresetStore, validate_snapshot
 from .study import StudyStore
 
 
@@ -55,6 +56,7 @@ def parser():
     impact.add_argument("ref")
     run = actions.add_parser("run")
     run.add_argument("--data", required=True, help="JSON with experiment_ref/input_refs/backend/capability/input_snapshot/idempotency_key")
+    run.add_argument("--preset-task", help="Pinned task preset JSON; no knowledge search or preference write")
     transition = actions.add_parser("transition")
     transition.add_argument("run_id")
     transition.add_argument("status")
@@ -95,6 +97,22 @@ def parser():
     read.add_argument("--depth", type=int, default=0, help="Explicit related-unit expansion depth; default 0")
     read.add_argument("--relation", action="append", help="Expand only this relation type; repeat to select more")
     read.add_argument("--max-units", type=int, default=20, help="Bound explicit expansion")
+    preset = commands.add_parser("preset", help="Active execution presets in a user-selected knowledge workspace")
+    preset.add_argument("root", help="Knowledge workspace; never a distributable skill directory")
+    actions = preset.add_subparsers(dest="action", required=True)
+    for name in ("activate", "current", "task", "save-default"):
+        action = actions.add_parser(name)
+        action.add_argument("--context", required=True, help="JSON domain/question and actual user/team/project identities")
+        if name == "activate":
+            action.add_argument("name", help="Named preset to select")
+            action.add_argument("--refs", help="JSON array of explicit {id, version} preference references; [] starts empty")
+        if name in ("task", "save-default"):
+            action.add_argument("--overrides", required=name == "save-default", help="JSON preference_key -> nonempty text; task changes are temporary")
+        if name == "task":
+            action.add_argument("--output", help="Pin a task snapshot file; a different existing snapshot is never overwritten")
+        if name == "save-default":
+            action.add_argument("--source", required=True, help="Source locator for the user's explicit reusable preference")
+            action.add_argument("--scope", choices=("user", "team", "project"), default="user")
     backend = commands.add_parser("backend", help="Validate local binding descriptions; does not call MCP")
     backend.add_argument("binding", help="User-authored eds-backend/v1 JSON file")
     actions = backend.add_subparsers(dest="action", required=True)
@@ -149,7 +167,12 @@ def dispatch(args):
         if args.action == "impact":
             return store.impact(args.ref)
         if args.action == "run":
-            return store.add_run(**read_json(args.data))
+            data = read_json(args.data)
+            if args.preset_task:
+                if "execution_preset" in data or "execution_preset" in data.get("input_snapshot", {}):
+                    raise ValueError("preset supplied twice; choose --preset-task or the Run payload")
+                data["execution_preset"] = read_json(args.preset_task)
+            return store.add_run(**data)
         if args.action == "transition":
             return store.transition_run(args.run_id, args.status, **(read_json(args.data) if args.data else {}))
         if args.action == "preferences":
@@ -183,6 +206,31 @@ def dispatch(args):
                     "route": route, "matches": matches}
         return kb.read(args.unit_id, version=args.version, depth=args.depth,
                        relation_types=args.relation, max_units=args.max_units)
+    if args.command == "preset":
+        presets = PresetStore(args.root)
+        context = read_json(args.context)
+        if args.action == "activate":
+            return presets.activate(args.name, context=context, refs=read_json(args.refs) if args.refs else None)
+        if args.action == "current":
+            return presets.current(context=context)
+        if args.action == "save-default":
+            return presets.save_default(context=context, overrides=read_json(args.overrides),
+                                        source=args.source, scope=args.scope)
+        snapshot = presets.for_task(context=context, overrides=read_json(args.overrides) if args.overrides else None)
+        if args.output:
+            # Task snapshots are immutable batch inputs, not preference memories.
+            target = Path(args.output)
+            if target.exists():
+                existing = read_json(str(target))
+                validate_snapshot(existing)
+                if existing != snapshot:
+                    raise ValueError("task preset output already pins a different snapshot; use a new output path")
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with target.open("x", encoding="utf-8") as stream:
+                    json.dump(snapshot, stream, ensure_ascii=False, indent=2, allow_nan=False)
+                    stream.write("\n")
+        return snapshot
     if args.command == "backend":
         binding = load_binding(args.binding)
         if args.action == "check":

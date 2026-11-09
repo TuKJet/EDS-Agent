@@ -23,6 +23,11 @@ A CAD-only study need not invent a CAE model.
 For useful history, route by `design`, `cad-modeling`, or `drawing` in the shared
 knowledge reference. Apply only confirmed preferences for the current user/team/
 project; drawing style is not evidence of geometric or manufacturing adequacy.
+For repeated drawing work, activate a scoped activity preset once and pass its
+fixed task snapshot to the execution handoff. Subsequent Runs consume that
+snapshot without searching the knowledge index. Task-specific changes remain
+overrides; persist them as defaults only after an explicit `save-default` action.
+Personal style stays in scoped preference data and never in this public Skill.
 
 Read the CAD sections of repository-root `docs/methods.md` only for a methodological
 gap. When a concrete experiment is ready to run, its execution owner follows

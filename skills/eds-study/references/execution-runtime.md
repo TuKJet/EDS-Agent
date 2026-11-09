@@ -1,5 +1,15 @@
 # Runtime execution route
 
+## Activity preset handoff
+
+The caller may provide a pinned activity task snapshot with a drawing request.
+Consume its effective values directly; do not perform a fresh preference or
+n-gram search for each part. Apply only fields supported by the selected
+`DrawingSpec`, and return `applied_style_fields`, `unmapped_style_fields` and
+`overridden_style_fields` in the execution evidence. The snapshot identifies
+the profile revision and source preference versions so a multi-part batch stays
+consistent. A task override is local to that snapshot and is not a default.
+
 Read this index after a local binding has been found and the selected MCP is
 expected to be usable. It is deliberately a routing sheet, not a copy of a
 vendor manual.
