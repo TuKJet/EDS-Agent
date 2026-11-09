@@ -17,6 +17,8 @@ from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
+from .personal_data import managed_cache_root, resolve_alias
+
 INDEX_VERSION = "2"
 META_RE = re.compile(r"<!--\s*eds-knowledge:\s*(\{.*?\})\s*-->", re.S)
 CJK_RE = re.compile(r"[\u3400-\u9fff]+")
@@ -121,15 +123,18 @@ class KnowledgeBase:
     """One explicit-registry knowledge workspace. Construction is read-only."""
 
     def __init__(self, root: str | os.PathLike[str]):
-        self.root = Path(root).resolve()
+        self.root = Path(resolve_alias(root)).resolve()
         self.registry_path = self.root / "registry.json"
-        self.db_path = self.root / "index.sqlite3"
+        self.cache_root = Path(managed_cache_root(self.root) or self.root)
+        self.db_path = self.cache_root / "index.sqlite3"
+        self.lock_path = self.cache_root / ".knowledge.lock"
 
     @contextmanager
     def _lock(self) -> Iterator[None]:
         """OS-owned locks survive neither process exit nor a crashed writer."""
         self.root.mkdir(parents=True, exist_ok=True)
-        with open(self.root / ".knowledge.lock", "a+b") as handle:
+        self.cache_root.mkdir(parents=True, exist_ok=True)
+        with open(self.lock_path, "a+b") as handle:
             handle.seek(0, os.SEEK_END)
             if handle.tell() == 0:
                 handle.write(b"0")
@@ -332,7 +337,7 @@ class KnowledgeBase:
             connection.execute("INSERT OR REPLACE INTO meta VALUES (?,?)", (key, json.dumps(value)))
 
     def _rebuild(self, paths: list[str], docs: dict[str, dict[str, Any]], missing: list[str]) -> dict[str, int]:
-        fd, name = tempfile.mkstemp(prefix="index.", suffix=".sqlite3", dir=self.root)
+        fd, name = tempfile.mkstemp(prefix="index.", suffix=".sqlite3", dir=self.db_path.parent)
         os.close(fd)
         temporary = Path(name)
         try:

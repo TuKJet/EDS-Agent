@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .presets import validate_snapshot
+from .personal_data import managed_cache_root, resolve_alias
 
 
 class StudyError(ValueError):
@@ -132,9 +133,9 @@ class StudyStore:
     """
 
     def __init__(self, root: str | os.PathLike[str], *, lock_timeout: float = 10.0):
-        self.root = Path(root).resolve()
+        self.root = Path(resolve_alias(root)).resolve()
         self.path = self.root / "study.json"
-        self.lock_path = self.root / ".study.lock"
+        self.lock_path = Path(managed_cache_root(self.root) or self.root) / ".study.lock"
         if type(lock_timeout) not in (int, float) or not math.isfinite(lock_timeout) or lock_timeout <= 0:
             raise StudyError("lock_timeout must be positive and finite")
         self.lock_timeout = lock_timeout
@@ -165,6 +166,7 @@ class StudyStore:
     @contextmanager
     def _lock(self) -> Iterator[None]:
         self.root.mkdir(parents=True, exist_ok=True)
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
         with self.lock_path.open("a+b") as handle:
             handle.seek(0, os.SEEK_END)
             if handle.tell() == 0:

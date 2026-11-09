@@ -17,6 +17,17 @@ For routine research, `study.json` is storage, not a reading entrypoint: opening
 it directly also bypasses the compact view. Fetch the needed record by its fixed
 ref or Run id; inspect the full file only for a specific data-repair/diagnostic need.
 
+## Portable personal data root
+
+When a portable EDS root is configured, prefer `"@knowledge"`, `"@study/<name>"` and
+`"@assets"` for new work. Initialize it with `python -m eds data init --user-id
+<stable-user-id>`; bind an existing copied root on another computer with
+`python -m eds data use <root>`, and inspect the binding with `data status`.
+`kb "@knowledge" sync/rebuild` only rebuilds the local index. Existing explicit
+paths remain valid. Keep the portable root to formal records and selected
+sources; credentials, backend bindings and VM-specific absolute paths stay local.
+See repository-root `docs/personal-data.md`.
+
 ## Load only for the current action
 
 The references below are conditional routes, not a startup reading list.

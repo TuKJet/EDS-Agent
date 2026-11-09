@@ -7,6 +7,25 @@
 Markdown 知识单元和 SQLite 中英文检索。真实 CAD/CAE 验收需接入用户的 VM/MCP；
 离线示例不代表真实工程操作通过。
 
+### 统一个人数据根目录
+
+需要在多台电脑间沿用知识、活动预设和 Study 时，可将它们放在同一个
+EDS 数据根目录。默认目录为 `~/EDS-Data`；显式 root 优先于
+`EDS_DATA_HOME`、`~/.eds/config.json` 中的本机绑定，最后才回退到默认目录。
+
+```powershell
+python -m eds data init --user-id <stable-user-id>
+python -m eds data status
+python -m eds kb "@knowledge" sync
+```
+
+在新电脑上复制或由外部同步整个根目录后，运行 `python -m eds data use <root>`，
+再执行 `kb "@knowledge" sync`（或 `rebuild`）重建本机索引。正式 Markdown、Study、
+预设和 `assets/` 下明确选定的附件可以随根目录携带；SQLite、锁、凭据、后端绑定和
+VM 绝对路径留在本机或需要重新绑定，根目录外的旧工程路径和大型 CAD 素材不会自动迁移。
+这是便携目录约定，不是远端同步引擎或冲突合并器。
+详见[个人数据根目录](docs/personal-data.md)。
+
 第一次了解这个工程，可先读[设计思路与分层协作](docs/design-overview.md)：其中用架构图、流程图和时序图说明研究闭环、逐级披露、子代理交接、知识分级以及 CAD/CAE 的组合方式。
 
 也可查看 [架构设计与 RSI 演示文稿](EDS-Agent_架构设计与RSI.pptx)（17 页）。

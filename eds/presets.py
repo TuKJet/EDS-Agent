@@ -15,6 +15,7 @@ from pathlib import Path
 
 from .knowledge import (KnowledgeBase, KnowledgeError, KNOWLEDGE_QUESTIONS,
                         KNOWLEDGE_STAGES, PREFERENCE_SCOPES, _metadata)
+from .personal_data import resolve_alias
 
 FORMAT = "eds-preset/v1"
 TASK_FORMAT = "eds-task-preset/v1"
@@ -140,7 +141,7 @@ def validate_snapshot(snapshot):
 
 class PresetStore:
     def __init__(self, root, kb=None):
-        self.root = Path(root).resolve()
+        self.root = Path(resolve_alias(root)).resolve()
         repository = Path(__file__).resolve().parent.parent
         if any(self.root.is_relative_to(repository / folder)
                for folder in ("skills", ".agents/skills", "execution-skills")):

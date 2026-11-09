@@ -77,3 +77,13 @@ later preset revision affects new tasks only.
 preference revisions only for changed settings, with the selected scope and a
 source locator. A no-op creates no new version. This is separate from `study
 preferences`, which controls extraction timing rather than drawing style.
+
+## Portable storage
+
+Preference Markdown, the knowledge registry and preset state belong under the
+portable data root and may be copied with it. On another computer, run
+`python -m eds data use <root>` and then `python -m eds kb "@knowledge" sync` (or
+`rebuild`) to recreate the local index. Do not copy SQLite files, locks,
+credentials, backend bindings or VM-specific paths into the root. The root does
+not import Codex chats; it carries only records and sources deliberately saved
+there.

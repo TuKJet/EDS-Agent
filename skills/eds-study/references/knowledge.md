@@ -4,6 +4,12 @@ Read this when history can change the current decision. Use only a user-selected
 knowledge workspace: logical collections share the Markdown registry and SQLite
 index. Do not scan other directories or load every collection at startup.
 
+When the portable data root is enabled, use `"@knowledge"` instead of repeating a
+machine-specific path. `data use <root>` binds a copied root on a new computer;
+`kb "@knowledge" sync` or `rebuild` performs only a local Markdown-to-SQLite
+rebuild. Markdown units and the registry are portable truth, while SQLite,
+locks and cache are local/rebuildable. Existing explicit paths remain supported.
+
 ## Choose the question before searching
 
 The current question takes priority over the stage. A stage is a fallback when the

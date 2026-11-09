@@ -16,6 +16,7 @@ from .install import REPO_ROOT, install_skills
 from .execution import readiness
 from .knowledge import KnowledgeBase, knowledge_route
 from .presets import PresetStore, validate_snapshot
+from .personal_data import init_data, use_data, data_status, get_paths
 from .study import StudyStore
 
 
@@ -29,13 +30,22 @@ def parser():
     app.add_argument("--version", action="version", version=__version__)
     commands = app.add_subparsers(dest="command", required=True)
     commands.add_parser("doctor", help="Check local Python, SQLite FTS5 and skill sources")
+    data = commands.add_parser("data", help="One portable personal data root; no remote synchronization")
+    data_actions = data.add_subparsers(dest="action", required=True)
+    data_init = data_actions.add_parser("init", help="Initialize knowledge/studies/assets under one root")
+    data_init.add_argument("root", nargs="?", help="Default: configured root or ~/EDS-Data")
+    data_init.add_argument("--user-id", required=True, help="Stable personal identity reused across computers")
+    data_use = data_actions.add_parser("use", help="Bind this computer to an existing personal data root")
+    data_use.add_argument("root")
+    data_status_parser = data_actions.add_parser("status", help="Read paths and identity without creating files")
+    data_status_parser.add_argument("root", nargs="?")
     install = commands.add_parser("install-skills", help="Install this repository's Codex skills")
     install.add_argument("--check", action="store_true")
     install.add_argument("--update", action="store_true")
     install.add_argument("--execution", choices=("auto", "cad", "cae", "none"), default="auto",
                          help="Apply/check repository-owned execution submodule patches")
     study = commands.add_parser("study", help="Versioned engineering study records")
-    study.add_argument("root", help="Study workspace, separate from the skill package")
+    study.add_argument("root", help="Study path or @study/<name> under the personal data root")
     actions = study.add_subparsers(dest="action", required=True)
     init = actions.add_parser("init")
     init.add_argument("--goal", required=True)
@@ -69,7 +79,7 @@ def parser():
         action = actions.add_parser(name)
         action.add_argument("--data", required=True)
     kb = commands.add_parser("kb", help="Explicit Markdown knowledge registration and retrieval")
-    kb.add_argument("root", help="Independent knowledge workspace")
+    kb.add_argument("root", help="Independent knowledge workspace or @knowledge")
     actions = kb.add_subparsers(dest="action", required=True)
     for name in ("status", "sync", "rebuild"):
         actions.add_parser(name)
@@ -98,11 +108,13 @@ def parser():
     read.add_argument("--relation", action="append", help="Expand only this relation type; repeat to select more")
     read.add_argument("--max-units", type=int, default=20, help="Bound explicit expansion")
     preset = commands.add_parser("preset", help="Active execution presets in a user-selected knowledge workspace")
-    preset.add_argument("root", help="Knowledge workspace; never a distributable skill directory")
+    preset.add_argument("root", help="Knowledge workspace or @knowledge; never a distributable skill directory")
     actions = preset.add_subparsers(dest="action", required=True)
     for name in ("activate", "current", "task", "save-default"):
         action = actions.add_parser(name)
-        action.add_argument("--context", required=True, help="JSON domain/question and actual user/team/project identities")
+        action.add_argument("--context", help="JSON domain/question and actual user/team/project identities")
+        action.add_argument("--question", help="Use the personal root identity and this question instead of --context")
+        action.add_argument("--domain", default=None, help="Domain with --question; defaults to cad")
         if name == "activate":
             action.add_argument("name", help="Named preset to select")
             action.add_argument("--refs", help="JSON array of explicit {id, version} preference references; [] starts empty")
@@ -141,6 +153,12 @@ def parser():
 
 
 def dispatch(args):
+    if args.command == "data":
+        if args.action == "init":
+            return init_data(args.root, user_id=args.user_id)
+        if args.action == "use":
+            return use_data(args.root)
+        return data_status(args.root)
     if args.command == "doctor":
         with sqlite3.connect(":memory:") as db:
             db.execute("CREATE VIRTUAL TABLE smoke USING fts5(content)")
@@ -208,7 +226,15 @@ def dispatch(args):
                        relation_types=args.relation, max_units=args.max_units)
     if args.command == "preset":
         presets = PresetStore(args.root)
-        context = read_json(args.context)
+        if args.context:
+            if args.question or args.domain:
+                raise ValueError("--context cannot be combined with --question/--domain")
+            context = read_json(args.context)
+        else:
+            if not args.question or args.root != "@knowledge":
+                raise ValueError("provide --context, or use @knowledge with --question")
+            context = {"domain": args.domain or "cad", "question": args.question,
+                       "user": get_paths()["user_id"]}
         if args.action == "activate":
             return presets.activate(args.name, context=context, refs=read_json(args.refs) if args.refs else None)
         if args.action == "current":

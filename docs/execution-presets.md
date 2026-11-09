@@ -26,6 +26,13 @@ requires an explicit `--refs` JSON file, even for a neutral empty preset:
 []
 ```
 
+For a portable root, bind it once with `python -m eds data use <root>` and use
+`"@knowledge"` as the knowledge root. The preference Markdown and preset state are
+portable; SQLite and locks are local and can be recreated with
+`python -m eds kb "@knowledge" sync` or `rebuild`. Existing explicit knowledge
+paths and `--context` remain supported. Copying a root does not copy Codex chats,
+credentials or VM/backend bindings.
+
 ## Lifecycle
 
 Activate a named preset with explicit fixed `id`/`version` references. The
