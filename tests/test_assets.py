@@ -7,8 +7,8 @@ from eds.assets import check_assets, fingerprint
 
 class AssetTests(unittest.TestCase):
     def test_manual_change_and_missing_asset_are_visible(self):
-        temporary_root = Path(__file__).resolve().parent.parent / ".test-tmp"
-        temporary_root.mkdir(exist_ok=True)
+        temporary_root = Path(__file__).resolve().parent.parent / "output" / "repository-tests" / "tmp"
+        temporary_root.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=temporary_root) as root:
             path = Path(root) / "part.step"
             path.write_bytes(b"initial fixture")

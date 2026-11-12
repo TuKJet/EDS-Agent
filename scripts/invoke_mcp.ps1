@@ -16,11 +16,17 @@ param(
 $ErrorActionPreference = 'Stop'
 $config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
 if (-not (Test-Path -LiteralPath $config.python_path -PathType Leaf)) { throw 'Configured MCP Python runtime is missing' }
-$secure = Import-Clixml -LiteralPath $config.token_credential_path
-if ($secure -isnot [Security.SecureString]) { throw 'Token credential must contain a DPAPI SecureString' }
 $previous = $env:EDS_MCP_TOKEN
+$secure = $null
 try {
-    $env:EDS_MCP_TOKEN = [Net.NetworkCredential]::new('', $secure).Password
+    $credentialPath = [string]$config.token_credential_path
+    if ([string]::IsNullOrWhiteSpace($credentialPath)) {
+        Remove-Item Env:\EDS_MCP_TOKEN -ErrorAction SilentlyContinue
+    } else {
+        $secure = Import-Clixml -LiteralPath $credentialPath
+        if ($secure -isnot [Security.SecureString]) { throw 'Token credential must contain a DPAPI SecureString' }
+        $env:EDS_MCP_TOKEN = [Net.NetworkCredential]::new('', $secure).Password
+    }
     $clientArgs = @('-B','-X','utf8',(Join-Path $PSScriptRoot 'mcp_call.py'),
         '--url',[string]$config.url,'--timeout',[string]$TimeoutSeconds,'--output',$OutputPath)
     if ($config.expected_server) { $clientArgs += @('--expected-server',[string]$config.expected_server) }

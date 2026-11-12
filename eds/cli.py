@@ -7,6 +7,7 @@ import platform
 import shutil
 import sqlite3
 import sys
+from contextlib import closing
 from pathlib import Path
 
 from . import __version__
@@ -29,7 +30,8 @@ def parser():
     app = argparse.ArgumentParser(prog="python -m eds", description="Codex engineering record and knowledge tools; no model or MCP execution loop")
     app.add_argument("--version", action="version", version=__version__)
     commands = app.add_subparsers(dest="command", required=True)
-    commands.add_parser("doctor", help="Check local Python, SQLite FTS5 and skill sources")
+    doctor = commands.add_parser("doctor", help="Check local Python, SQLite FTS5 and skill sources")
+    doctor.add_argument("--graph", action="store_true", help="Also load and exercise optional GraphQLite")
     data = commands.add_parser("data", help="One portable personal data root; no remote synchronization")
     data_actions = data.add_subparsers(dest="action", required=True)
     data_init = data_actions.add_parser("init", help="Initialize knowledge/studies/assets under one root")
@@ -39,6 +41,31 @@ def parser():
     data_use.add_argument("root")
     data_status_parser = data_actions.add_parser("status", help="Read paths and identity without creating files")
     data_status_parser.add_argument("root", nargs="?")
+    product = commands.add_parser("product", help="Take over existing product files and progressively recorded design information")
+    product.add_argument("root", help="Product record path or @product/<id> under the personal data root")
+    product_actions = product.add_subparsers(dest="action", required=True)
+    product_init = product_actions.add_parser("init", help="Create an existing-product baseline using the Study version mechanism")
+    product_init.add_argument("--product-id", required=True)
+    product_init.add_argument("--name", required=True)
+    product_actions.add_parser("resume", help="Read the current baseline, provenance and information gaps")
+    for name in ("show", "check-assets"):
+        action = product_actions.add_parser(name)
+        action.add_argument("--ref", help="Fixed baseline revision; omitted reads the current revision")
+    attach = product_actions.add_parser("attach", help="Preserve a selected file and its hash in a new baseline revision")
+    attach.add_argument("path")
+    attach.add_argument("--asset-id", required=True)
+    attach.add_argument("--role", required=True, choices=("drawing", "cad", "bom", "cae", "document", "text", "other"))
+    attach.add_argument("--base", required=True, help="Current fixed baseline revision, e.g. product-baseline@1")
+    attach.add_argument("--revision", help="Revision stated by the source document or user")
+    product_update = product_actions.add_parser("update", help="Record sourced text, parameters, constraints and gaps incrementally")
+    product_update.add_argument("--data", required=True, help="JSON changes; - reads stdin")
+    product_update.add_argument("--base", required=True)
+    product_use = product_actions.add_parser("use", help="Pin a product revision into an existing CAD/CAE Study")
+    product_use.add_argument("--study", required=True)
+    product_use.add_argument("--baseline", required=True)
+    product_publish = product_actions.add_parser("publish", help="Publish a fixed product revision into the existing knowledge library")
+    product_publish.add_argument("--baseline", required=True)
+    product_publish.add_argument("--knowledge-root", help="Default: the product's containing personal data root")
     install = commands.add_parser("install-skills", help="Install this repository's Codex skills")
     install.add_argument("--check", action="store_true")
     install.add_argument("--update", action="store_true")
@@ -91,22 +118,32 @@ def parser():
     kb.add_argument("root", help="Independent knowledge workspace or @knowledge")
     actions = kb.add_subparsers(dest="action", required=True)
     for name in ("status", "sync", "rebuild"):
-        actions.add_parser(name)
+        action = actions.add_parser(name)
+        if name != "status":
+            action.add_argument("--graph", action="store_true", help="Also rebuild the optional graph projection")
+    graph_sync = actions.add_parser("graph-sync", help="Sync SQLite and the optional derived graph")
+    graph_sync.add_argument("--force", action="store_true", help="Rebuild even when the graph is current")
+    actions.add_parser("graph-status", help="Inspect graph freshness without modifying data")
     for name in ("register", "unregister"):
         item = actions.add_parser(name)
         item.add_argument("path", help="Markdown path relative to knowledge root")
-    search = actions.add_parser("search")
-    search.add_argument("query")
-    search.add_argument("--limit", type=int, default=10)
-    search.add_argument("--type")
-    search.add_argument("--domain")
-    search.add_argument("--project")
-    search.add_argument("--question", help="Purpose route; explicit question takes priority over stage")
-    search.add_argument("--stage", help="Fallback route when the question is not specified")
-    search.add_argument("--user", help="User identity for scoped engineering preferences")
-    search.add_argument("--team", help="Team identity for scoped engineering preferences")
-    search.add_argument("--preference-status", choices=("candidate", "confirmed", "retired"),
-                        help="Explicit preference review; normal retrieval uses confirmed preferences")
+    for name in ("search", "graph-search"):
+        search = actions.add_parser(name)
+        search.add_argument("query")
+        search.add_argument("--limit", type=int, default=10)
+        search.add_argument("--type")
+        search.add_argument("--domain")
+        search.add_argument("--project")
+        search.add_argument("--question", help="Purpose route; explicit question takes priority over stage")
+        search.add_argument("--stage", help="Fallback route when the question is not specified")
+        search.add_argument("--user", help="User identity for scoped engineering preferences")
+        search.add_argument("--team", help="Team identity for scoped engineering preferences")
+        search.add_argument("--preference-status", choices=("candidate", "confirmed", "retired"),
+                            help="Explicit preference review; normal retrieval uses confirmed preferences")
+        if name == "graph-search":
+            search.add_argument("--depth", type=int, default=2, help="Graph hops, from 0 to 3")
+            search.add_argument("--max-nodes", type=int, default=100, help="Graph exploration budget, from 1 to 100")
+            search.add_argument("--relation", action="append", help="Traverse only this relation; repeat to select more")
     route = actions.add_parser("route", help="Show a local knowledge route without searching or writing")
     route.add_argument("--question")
     route.add_argument("--stage")
@@ -162,6 +199,26 @@ def parser():
 
 
 def dispatch(args):
+    if args.command == "product":
+        from .products import ProductStore
+        if args.action == "init":
+            return ProductStore.create(args.root, product_id=args.product_id, name=args.name).resume()
+        product = ProductStore(args.root)
+        if args.action == "resume":
+            return product.resume()
+        if args.action == "show":
+            return product.show(ref=args.ref)
+        if args.action == "check-assets":
+            return product.check_assets(ref=args.ref)
+        if args.action == "attach":
+            return product.attach(args.path, asset_id=args.asset_id, role=args.role,
+                                  base_ref=args.base, revision=args.revision)
+        if args.action == "update":
+            return product.update(read_json(args.data), base_ref=args.base)
+        if args.action == "use":
+            return product.use(args.study, baseline_ref=args.baseline)
+        if args.action == "publish":
+            return product.publish(baseline_ref=args.baseline, knowledge_root=args.knowledge_root)
     if args.command == "data":
         if args.action == "init":
             return init_data(args.root, user_id=args.user_id)
@@ -169,11 +226,15 @@ def dispatch(args):
             return use_data(args.root)
         return data_status(args.root)
     if args.command == "doctor":
-        with sqlite3.connect(":memory:") as db:
+        with closing(sqlite3.connect(":memory:")) as db:
             db.execute("CREATE VIRTUAL TABLE smoke USING fts5(content)")
-        return {"eds_version": __version__, "python": platform.python_version(), "python_supported": sys.version_info >= (3, 11),
+        result = {"eds_version": __version__, "python": platform.python_version(), "python_supported": sys.version_info >= (3, 11),
                 "sqlite": sqlite3.sqlite_version, "fts5": True, "codex_cli_present": bool(shutil.which("codex")),
                 "skill_installation": install_skills(check=True), "real_backend_validation": "not_checked_by_doctor"}
+        if args.graph:
+            from .graph import runtime_status
+            result["graph"] = runtime_status(probe=True)
+        return result
     if args.command == "install-skills":
         return install_skills(check=args.check, update=args.update, execution=args.execution)
     if args.command == "study":
@@ -225,13 +286,25 @@ def dispatch(args):
             return knowledge_route(question=args.question, stage=args.stage)
         kb = KnowledgeBase(args.root)
         if args.action in ("status", "sync", "rebuild"):
-            return getattr(kb, args.action)()
+            result = getattr(kb, args.action)()
+            if getattr(args, "graph", False):
+                from .graph import KnowledgeGraph
+                result["graph"] = KnowledgeGraph(kb).sync(force=args.action == "rebuild", _sqlite_ready=True)
+            return result
+        if args.action in ("graph-sync", "graph-status"):
+            from .graph import KnowledgeGraph
+            graph = KnowledgeGraph(kb)
+            return graph.sync(force=args.force) if args.action == "graph-sync" else graph.status()
         if args.action in ("register", "unregister"):
             return getattr(kb, args.action)(args.path)
-        if args.action == "search":
+        if args.action in ("search", "graph-search"):
             filters = {key: getattr(args, key) for key in
                        ("type", "domain", "project", "question", "stage", "user", "team", "preference_status")
                        if getattr(args, key) is not None}
+            if args.action == "graph-search":
+                from .graph import KnowledgeGraph
+                return KnowledgeGraph(kb).search(args.query, limit=args.limit, depth=args.depth,
+                                                max_nodes=args.max_nodes, relation_types=args.relation, **filters)
             matches = kb.search(args.query, limit=args.limit, **filters)
             route = knowledge_route(question=args.question, stage=args.stage)
             if args.type is not None:
@@ -302,6 +375,8 @@ def main(argv=None):
                                              for report in result.get("execution_patches", []))):
             return 1
         if args.command == "execution" and not result.get("ready", False):
+            return 1
+        if args.command == "doctor" and args.graph and not result["graph"].get("available", False):
             return 1
         return 0
     except (ValueError, TypeError, KeyError, OSError, sqlite3.DatabaseError) as exc:

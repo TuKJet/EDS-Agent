@@ -15,8 +15,8 @@ from eds.study import StudyStore
 
 class CentralExperienceTests(unittest.TestCase):
     def setUp(self):
-        base = Path(__file__).resolve().parents[1] / ".test-tmp"
-        base.mkdir(exist_ok=True)
+        base = Path(__file__).resolve().parents[1] / "output" / "repository-tests" / "tmp"
+        base.mkdir(parents=True, exist_ok=True)
         temp = tempfile.TemporaryDirectory(dir=base)
         self.addCleanup(temp.cleanup)
         self.workspace = Path(temp.name)

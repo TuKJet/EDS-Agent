@@ -9,8 +9,8 @@ from scripts.demo_offline import run_demo
 
 class OfflineDemoTests(unittest.TestCase):
     def test_three_paths_preserve_evidence_and_keep_live_acceptance_pending(self):
-        temporary_root = REPO_ROOT / ".test-tmp"
-        temporary_root.mkdir(exist_ok=True)
+        temporary_root = REPO_ROOT / "output" / "repository-tests" / "tmp"
+        temporary_root.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=temporary_root) as root:
             report = run_demo(root)
             self.assertEqual(report["real_mcp_calls"], 0)

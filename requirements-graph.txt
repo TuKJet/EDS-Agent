@@ -1,0 +1,2 @@
+# Optional derived graph queries; the EDS record core remains standard-library only.
+graphqlite==0.9.4

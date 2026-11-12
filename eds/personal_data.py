@@ -182,7 +182,7 @@ def get_paths(root: str | os.PathLike[str] | None = None, *, manifest: dict[str,
 
 
 def resolve_alias(value: str | os.PathLike[str], root: str | os.PathLike[str] | None = None) -> str | os.PathLike[str]:
-    """Resolve @knowledge and @study/<safe-id>; explicit paths are unchanged."""
+    """Resolve personal data aliases; explicit paths are unchanged."""
     original = value
     if isinstance(value, os.PathLike):
         value = os.fspath(value)
@@ -194,16 +194,17 @@ def resolve_alias(value: str | os.PathLike[str], root: str | os.PathLike[str] | 
         return paths["knowledge"]
     if text == "@assets":
         return paths["assets"]
-    prefix = "@study/"
-    if text.startswith(prefix):
-        study_id = text[len(prefix):]
-        if not _STUDY.fullmatch(study_id):
-            raise PersonalDataError("study alias contains an unsafe id")
-        studies_root = Path(paths["studies"]).resolve()
-        candidate = (studies_root / study_id).resolve(strict=False)
-        if not candidate.is_relative_to(studies_root):
-            raise PersonalDataError("study alias escapes the managed studies directory")
-        return str(candidate)
+    for prefix, subdirectory in (("@study/", None), ("@product/", "products")):
+        if text.startswith(prefix):
+            record_id = text[len(prefix):]
+            if not _STUDY.fullmatch(record_id):
+                raise PersonalDataError("study/product alias contains an unsafe id")
+            studies_root = Path(paths["studies"]).resolve()
+            parent = studies_root / subdirectory if subdirectory else studies_root
+            candidate = (parent / record_id).resolve(strict=False)
+            if not candidate.is_relative_to(studies_root) or not candidate.is_relative_to(parent.resolve()):
+                raise PersonalDataError("study/product alias escapes the managed studies directory")
+            return str(candidate)
     raise PersonalDataError(f"unknown personal data alias: {text}")
 
 

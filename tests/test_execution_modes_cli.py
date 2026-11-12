@@ -11,8 +11,8 @@ from eds.install import REPO_ROOT
 
 class ExecutionModesCLITests(unittest.TestCase):
     def setUp(self):
-        (REPO_ROOT / ".test-tmp").mkdir(exist_ok=True)
-        self.temp = tempfile.TemporaryDirectory(dir=REPO_ROOT / ".test-tmp")
+        (REPO_ROOT / "output" / "repository-tests" / "tmp").mkdir(parents=True, exist_ok=True)
+        self.temp = tempfile.TemporaryDirectory(dir=REPO_ROOT / "output" / "repository-tests" / "tmp")
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.binding = self.root / "binding.json"

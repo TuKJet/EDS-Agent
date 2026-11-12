@@ -12,7 +12,7 @@ from eds import personal_data
 
 class PersonalDataTests(unittest.TestCase):
     def setUp(self):
-        test_root = Path(__file__).resolve().parents[1] / ".test-tmp"
+        test_root = Path(__file__).resolve().parents[1] / "output" / "repository-tests" / "tmp"
         test_root.mkdir(parents=True, exist_ok=True)
         self.tmp = tempfile.TemporaryDirectory(dir=test_root)
         self.root = Path(self.tmp.name) / "data"
@@ -90,8 +90,9 @@ class PersonalDataTests(unittest.TestCase):
         personal_data.init(self.root, user_id="alice")
         self.assertEqual(Path(personal_data.resolve_alias("@knowledge", self.root)), self.root / "knowledge")
         self.assertEqual(Path(personal_data.resolve_alias("@study/job-1", self.root)), self.root / "studies" / "job-1")
+        self.assertEqual(Path(personal_data.resolve_alias("@product/gearbox", self.root)), self.root / "studies" / "products" / "gearbox")
         self.assertEqual(personal_data.resolve_alias("C:/explicit/file", self.root), "C:/explicit/file")
-        for value in ("@study/../secret", "@study/a/b", "@unknown"):
+        for value in ("@study/../secret", "@study/a/b", "@product/../secret", "@product/a/b", "@product/", "@unknown"):
             with self.assertRaises(personal_data.PersonalDataError):
                 personal_data.resolve_alias(value, self.root)
         self.assertEqual(personal_data.resolve_alias(Path("C:/explicit/file"), self.root), Path("C:/explicit/file"))

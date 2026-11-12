@@ -18,8 +18,8 @@ from eds.study import StudyError, StudyStore
 
 class PresetCLITests(unittest.TestCase):
     def setUp(self):
-        temporary_root = REPO_ROOT / ".test-tmp"
-        temporary_root.mkdir(exist_ok=True)
+        temporary_root = REPO_ROOT / "output" / "repository-tests" / "tmp"
+        temporary_root.mkdir(parents=True, exist_ok=True)
         temporary = tempfile.TemporaryDirectory(dir=temporary_root)
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)

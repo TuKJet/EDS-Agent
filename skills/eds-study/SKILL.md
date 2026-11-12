@@ -1,12 +1,14 @@
 ---
 name: eds-study
-description: "Guide CAD/CAE study reasoning and continuity: frame alternatives and experiments, interpret evidence, record decisions, and resume work across Codex sessions."
+description: "Take over existing product baselines and guide CAD/CAE studies: frame alternatives and experiments, interpret evidence, record decisions, and resume work across Codex sessions."
 ---
 
 # EDS study
 
 Codex owns the engineering decisions; the local `eds` package preserves records.
-Start with `python -m eds study <study-path> resume` and the user's question.
+For an existing-product intake, use the product takeover route below; resume an
+existing product with `python -m eds product <product-path> resume`.
+For a research task, start with `python -m eds study <study-path> resume` and the user's question.
 This is a compact index, not the full record or an engineering assessment.
 Read a selected entity with `show --ref <fixed-ref>` when its content can change
 the decision; read a pending Run with `show --run <run-id>` when reconciling it.
@@ -28,6 +30,29 @@ paths remain valid. Keep the portable root to formal records and selected
 sources; credentials, backend bindings and VM-specific absolute paths stay local.
 See repository-root `docs/personal-data.md`.
 
+## Task files and completion cleanup
+
+Before creating task files, choose the project's `output/<case-or-task>/` directory
+(or the user's explicit external workspace). Keep one-off scripts, probes, test
+fixtures/results, logs, screenshots, frames and intermediate exports there, never
+in the repository root or distributable Skill directories. Keep maintained code,
+reusable examples and regression test sources in their normal source directories;
+repository test scratch belongs in `output/repository-tests/` and should use an
+automatically cleaned temporary directory. Formal portable records keep their
+configured data root; this convention does not relocate existing product assets.
+
+At completion, reconcile active/unknown runs before cleanup. Retain deliverables,
+editable source models and dependencies, fixed input versions, Study/Run records,
+cited evidence, validation results and the scripts needed to reproduce them.
+Remove owned, unreferenced scratch files that have no reuse value: disposable
+fixtures, staging copies, redundant exports and regenerable caches or frame sets
+after final-media validation. Inspect references and native model dependencies
+first; an original export bound as Evidence is not disposable scratch. Do not
+delete user originals, another task's files, shared configuration or unresolved
+failure evidence. Keep uncertain items and state why. Verify cleanup targets stay
+inside the owned task directory; do not blanket-delete `output/` or infer that
+ignored files are expendable. Report retained results and any deferred cleanup.
+
 ## Load only for the current action
 
 The references below are conditional routes, not a startup reading list.
@@ -39,8 +64,10 @@ The references below are conditional routes, not a startup reading list.
 | Create/update records or resume a run | The relevant section of `docs/record-format.md`: current state, entities, Run, evidence, or method-use. Use `python -m eds --help` for the actual operation. |
 | Search history | [Knowledge routing](references/knowledge.md): select by current question, then stage; read selected units before expanding relevant relations. |
 | Choose or repair an execution route | Search `execution-guidance` or `failure-recovery`; compare conditions and read the fixed feedback version before changing the brief. |
+| Plan modeling views, result exports, animations or human-facing delivery | Resolve the actual user's scoped presentation preferences or existing activity preset before freezing the execution brief; follow [preferences](references/preferences.md). Include readable-view acceptance checks and the fixed task snapshot in the handoff, not only in the final report. |
 | Extract or revise reusable knowledge | [Unit contracts](references/knowledge-units.md), only when requested or configured. Personal conventions use the separate preference contract. |
 | Execute a recorded experiment | The execution owner reads [execution handoff](references/execution.md); healthy MCP calls use runtime task references, installation/troubleshooting is a separate conditional route. |
+| Take over an existing product baseline | Read [product takeover](references/product-takeover.md) for the minimum baseline, statement/source rules, and product-to-Study handoff. Do not preload vendor manuals or execution Skills for discussion. |
 
 Discussion, interpretation and iteration planning do not load vendor manuals,
 MCP tool schemas or installation instructions. A feasibility uncertainty may
@@ -51,6 +78,14 @@ Missing connection information first triggers discovery of existing configuratio
 not installation. Search history only when it can change the decision; do not load
 all collections. Personal preferences are scoped conventions, not physical evidence
 or the `once/auto/later/skip` extraction setting.
+
+For product takeover, distinguish observed drawing/text content, document or user
+reports, and Codex inference. Keep conflicts and missing information as gaps; do not
+invent unrecorded experiments or silently bind a newer source revision. A partial 2D
+takeover can be useful without claiming an unreconstructed 3D feature tree or CAE
+setup. The product route is a record and handoff mechanism, not automatic OCR/CAD
+parsing or engineering acceptance. Read the product reference only when the current
+task actually creates, resumes, updates, checks or publishes a product baseline.
 
 ## Research and continuity
 

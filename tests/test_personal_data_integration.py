@@ -20,8 +20,8 @@ REPO = Path(__file__).resolve().parents[1]
 
 class PersonalDataIntegrationTests(unittest.TestCase):
     def setUp(self):
-        temporary_root = REPO / ".test-tmp"
-        temporary_root.mkdir(exist_ok=True)
+        temporary_root = REPO / "output" / "repository-tests" / "tmp"
+        temporary_root.mkdir(parents=True, exist_ok=True)
         temporary = tempfile.TemporaryDirectory(dir=temporary_root)
         self.addCleanup(temporary.cleanup)
         self.workspace = Path(temporary.name)

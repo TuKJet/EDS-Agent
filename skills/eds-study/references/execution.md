@@ -2,6 +2,18 @@
 
 ## Activity preset handoff
 
+Before a modeling-view, result-plot, animation or export plan is frozen, resolve
+the actual user's applicable presentation preference or active preset once. If
+no matching preset exists, retrieve confirmed scoped preferences explicitly and
+compile a named preset. Do not wait until final delivery to load the convention.
+Include its immutable task snapshot in the Run input plus concrete readability
+checks: identifiable structure/material/region; physically meaningful direction;
+quantity, units, scale and time semantics; comparison consistency; source binding;
+and representative-frame/final-media visual inspection. Unsupported display
+settings remain explicit in the handoff and require a supported presentation route,
+not silently omitted requirements. This is an owner-enforced handoff obligation,
+not a claim that every external MCP tool automatically injects preference memory.
+
 If an activity preset is selected, include its fixed task snapshot in the task
 brief: preset name, context, revision/hash, source preference refs, effective
 values, and task overrides. Do not re-run knowledge search during each Run;
@@ -33,10 +45,21 @@ Provide only the information needed for the assigned action:
 - Ownership: which model/session, artifacts and record changes this executor owns;
   what is read-only; required result location. The agent is not alone in the workspace
   and must preserve other agents' changes.
+- File lifecycle: the task's `output/<case-or-task>/` (or explicit external workspace),
+  scratch subdirectory, retained deliverables/evidence and cleanup owner. Use the
+  same separation in the selected remote workspace. Return artifact paths and
+  dependencies before cleanup; follow the shared Study completion rules, including
+  preserving referenced native outputs and reconciling unfinished runs first.
 
 For setup/probe there may be no experiment yet: record the question and do only the
 authorized discovery. Missing capabilities return a bounded finding, not invented
 tools or an unsolicited model change. Do not pass credential values in the brief.
+
+For a design imported from a product baseline, retain its fixed source product
+identity, baseline reference, content hash and `asset_context`. Check that pinned
+baseline's attachments before a new execution; review stale-source statements and
+task-relevant gaps. Resolve external source roots explicitly after a move. Do not
+replace a task's input with the latest product revision implicitly.
 
 ## Owner and execution boundaries
 

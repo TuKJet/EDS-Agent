@@ -9,6 +9,9 @@ machine-specific path. `data use <root>` binds a copied root on a new computer;
 `kb "@knowledge" sync` or `rebuild` performs only a local Markdown-to-SQLite
 rebuild. Markdown units and the registry are portable truth, while SQLite,
 locks and cache are local/rebuildable. Existing explicit paths remain supported.
+The optional GraphQLite projection follows the same boundary: `graph.sqlite3` is a
+local derived cache, rebuilt with `graph-sync`, and is never the source record or
+a multi-machine merge artifact.
 
 ## Choose the question before searching
 
@@ -65,6 +68,27 @@ fixed-version read validates the selected source and need not wait for unrelated
 edits to be indexed. Use `kb <knowledge-root> status` for an explicit full index
 audit when maintaining or troubleshooting the library, not before every query.
 
+## Optional relationship graph
+
+Keep SQLite/FTS5 as the default retrieval path. Install GraphQLite only when a task
+needs bounded relationship, condition, or method-effect paths; see the repository
+guide `docs/graph-knowledge.md`. Maintain it explicitly
+with `graph-sync` or `sync/rebuild --graph`, and inspect it with `graph-status`.
+`graph-search` seeds from the existing lexical index and returns fixed unit
+references that must still be read and source-verified through the normal path.
+Bound traversal to depth 0–3 and a finite node budget. Do not expose arbitrary
+Cypher or write preferences into the engineering graph. If the optional extension
+is missing or its cache is stale, report the graph route as unavailable and
+continue with ordinary lexical search when that route is sufficient. `graph-status`
+is diagnostic and reports these states; `graph-sync` creates or repairs the cache
+with a usable optional runtime, while `graph-search` requires a fresh cache.
+
+Do not perform graph lookup on every CAD/CAE tool call. Select one graph result set
+for the current question or Run, record the fixed references and conditions used,
+and reuse that snapshot through the execution. Preferences remain governed by the
+activity preset mechanism; they are deliberately excluded from the engineering
+graph.
+
 ## Select, read, then expand
 
 Search returns candidate identities, brief matches and source/condition locators.
@@ -88,6 +112,34 @@ link is a lead to a result, not a statement that the result passed. Read contrar
 or limiting evidence when it affects the decision.
 
 ## Record use or curate knowledge
+
+### Cross-domain transfer and context budget
+
+Keep a complete Study provenance graph separate from the curated knowledge graph.
+An execution endpoint needs an outcome and source record; it does not automatically
+deserve a reusable method unit. Do not publish every tool call as a general lesson.
+
+Before retrieval, identify the current question, physical domain, regime, material
+assumptions and validation goal. Search process methods separately from physical
+methods and product results. Shared process methods (controlled comparisons,
+verification gates, provenance and display semantics) may use `domain: engineering`;
+physical methods should use a specific domain such as `thermal-fluid`. `domain`
+is an exact metadata filter, not an ontology or an automatic applicability model.
+Legacy `cae` records need explicit condition review before reuse.
+
+For a new domain, first select at most three relevant method candidates. Read fixed
+versions at depth 0, then assess applicability. A thermal-fluid result is not a
+magnetic or wear-model validation. Transfer an experimental procedure only after
+redefining its observables, equations and decision rule for the new physical domain;
+do not transfer material values, error tolerances, operating budgets or performance
+gains simply because the words "simulation" or "optimization" match.
+
+Use graph traversal to answer a specific provenance or applicability question,
+normally one hop and only the needed relation. It must not automatically expand
+neighbor bodies into the active context. A zero-match result is valid and does not
+justify broadening to unrelated physical domains. Record rejected cross-domain
+candidates as well as adopted/limited ones. These are owner-enforced retrieval
+rules; the current lexical index and graph do not implement a semantic firewall.
 
 Compare historical conditions and evidence with the current task; record adopted,
 limited or rejected use with a reason, unit/version, affected Study refs and actual

@@ -76,7 +76,7 @@ python -m eds backend local/cae-binding.json status solve solving
 
 ## 使用现有官方 SDK 客户端
 
-宿主未暴露目标服务的原生工具时，可以用 `scripts/mcp_call.py` 发出一次由 Codex 选定的请求；它复用用户已有 `mcp/httpx/jsonschema` 运行环境，不实现 MCP 协议或研究循环，也不自动安装依赖。`scripts/invoke_mcp.ps1` 可从本机 DPAPI SecureString 文件临时读取 token，配置只保存 `python_path`、`token_credential_path`、`url` 和 `expected_server`，放在被忽略的 `local/` 中。
+宿主未暴露目标服务的原生工具时，可以用 `scripts/mcp_call.py` 发出一次由 Codex 选定的请求；它复用用户已有 `mcp/httpx/jsonschema` 运行环境，不实现 MCP 协议或研究循环，也不自动安装依赖。`scripts/invoke_mcp.ps1` 可从本机 DPAPI SecureString 文件临时读取 token，配置只保存 `python_path`、`token_credential_path`、`url` 和 `expected_server`，放在被忽略的 `local/` 中。`token_credential_path` 是可选字段：对已经由来源地址限制保护的选定后端，省略该字段或设为空字符串即可进行无 bearer token 调用；调用期间会清除继承的 `EDS_MCP_TOKEN`，完成后恢复原值。若配置了该字段但文件缺失、无效或不是 DPAPI SecureString，调用会失败，不会降级为无 token。此配置不改变网络访问策略。
 
 ```powershell
 ./scripts/invoke_mcp.ps1 -ConfigPath local/cad-mcp-client.json `

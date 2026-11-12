@@ -26,8 +26,8 @@ def write_pref(root, uid, value="A3", *, scope="user", scope_id="u1", status="co
 
 class PresetTests(unittest.TestCase):
     def setUp(self):
-        temporary_root = Path(__file__).resolve().parent.parent / ".test-tmp"
-        temporary_root.mkdir(exist_ok=True)
+        temporary_root = Path(__file__).resolve().parent.parent / "output" / "repository-tests" / "tmp"
+        temporary_root.mkdir(parents=True, exist_ok=True)
         self.tmp = tempfile.TemporaryDirectory(dir=temporary_root, prefix="preset-")
         self.root = Path(self.tmp.name)
         self.kb = KnowledgeBase(self.root)

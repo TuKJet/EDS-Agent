@@ -3,9 +3,45 @@
 工程设计与仿真研究工具包。Codex 直接负责理解目标、提出方案、选择实验、调用用户 MCP、
 评价结果及提取经验；本仓库提供确定性的记录和检索工具，不内嵌第二个模型或 Agent 循环。
 
-已提供 CAD 独立、CAE 独立及联合方法、版本化工程记录、任务接续、变更影响、
-Markdown 知识单元和 SQLite 中英文检索。真实 CAD/CAE 验收需接入用户的 VM/MCP；
-离线示例不代表真实工程操作通过。
+已提供 CAD 独立、CAE 独立及联合方法、版本化工程记录、产品基线接管、任务接续、
+变更影响、个人数据根目录、活动预设、中央经验记录和 SQLite 中英文检索；
+GraphQLite 可按需提供有界关系追溯。真实 CAD/CAE 操作通过用户选定的 VM/MCP 执行，
+下面展示两个实际案例；具体操作、数值验证与产品验收分别记录。
+
+## 实际运行效果
+
+### CAD · 四缸发动机运行与爆炸展示
+
+从原生零件、装配配合到曲柄连杆运动，构建约 **2.0 L 直列四缸发动机**：
+37 种零件、116 个组件，包含缸体外壳、缸盖罩、油底壳和正时罩。
+展示按“运行 → 停机 → 整体外观 → 零件展开”组织，便于看清机构和装配层次。
+运行段仅隐藏朝向镜头一侧的四片外壳，背侧外壳、缸套和附件均保留；停机后恢复完整外观。
+
+![四缸发动机运行后展开零件的连续展示](docs/media/demos/engine-motion-exploded.gif)
+
+[观看发动机展示视频（MP4，10 秒，约 195 KB）](docs/media/demos/engine-motion-exploded.mp4) · 上方 GIF 约 1.11 MB。
+
+本次在 SolidWorks 中重新计算运动并导出原生帧，已验证原生运动与交付包重开。当前是产品概念与机构展示，气门仍为静态示意；
+爆炸位移用于讲解结构，不代表拆装工艺或制造放行。
+
+### CAE · 多 Die 液冷：从结构迭代到真实升温对比
+
+对 **两组 × 四层 Die、总热功率 600 W** 的液冷模型，Agent 从浅直道基线迭代到
+加深直通道，再比较 **624 根铜柱**方案，并复核能量收支、网格敏感性和数值方法。
+32 秒视频同时显示散热结构、液体流向和开机升温，结尾给出 COMSOL 原生热点对比。
+
+[![点击查看多 Die 液冷优化对比视频](docs/media/demos/liquid-cooling-poster.png)](docs/media/demos/liquid-cooling-comparison.mp4)
+
+**[观看液冷对比视频（MP4，32 秒，约 1.6 MB）](docs/media/demos/liquid-cooling-comparison.mp4)**
+
+在相同冷板液压功率约 **0.008519 W** 下，主比较的最高 Die 温度由 **167.84℃**
+降至 **153.27℃**（降低 **14.57 K**）；压力阶次交叉复核得到 **155.55℃**，
+仍较基线低 **12.29 K**。这是恒物性、单相条件下的数值演示与有限网格检查。
+动画采用已建立的稳态流场和真实热瞬态数据，播放慢放不增加求解时间精度。
+
+[两个案例的过程、来源与验证范围](docs/demo-gallery.md)
+
+## 研究接续与经验复用
 
 ### 统一个人数据根目录
 
@@ -26,6 +62,12 @@ VM 绝对路径留在本机或需要重新绑定，根目录外的旧工程路�
 这是便携目录约定，不是远端同步引擎或冲突合并器。
 详见[个人数据根目录](docs/personal-data.md)。
 
+已有产品也可以在同一数据根目录中建立可追溯的产品基线：先以渐进式图纸和文字
+接管现状，再按固定基线派生 CAD/CAE Study。产品基线、附件哈希和声明不会替代
+原始 Study，也不会把未记录的历史实验补写成事实；当前能力不自动解析 OCR、CAD
+特征树或 CAE 设置。入口、引用和发布边界见[产品接管](docs/product-takeover.md)，
+使用 `eds-study` 时仅在产品任务需要时读取[产品接管参考](skills/eds-study/references/product-takeover.md)。
+
 受管 Study 的每轮工程迭代在形成 Assessment 后，可发布到个人根目录
 `knowledge/iterations/` 的中央 `feedback` 历史；后续 CAD/CAE 任务按条件
 检索这些方法适用性、路线、失败和修复经验，不必逐个遍历旧项目。论文方法、
@@ -37,31 +79,9 @@ VM 绝对路径留在本机或需要重新绑定，根目录外的旧工程路�
 
 也可查看 [架构设计与 RSI 演示文稿](EDS-Agent_架构设计与RSI.pptx)（17 页）。
 
-## 实际运行效果
-
-以下精选图片来自实际 MCP 工作流：一个 SolidWorks 几何候选，以及一组 CAD/CAE 联合热分析的反馈迭代。
-
-**CAD · 原生零件建模**
-
-SolidWorks 独立测试中的三孔候选 B，完成原生几何回读与成果导出。下图为实际零件的等轴预览。
-
-<img src="docs/images/demos/cad-three-hole.png" width="360" alt="SolidWorks 三孔候选 B 的实际等轴预览">
-
-**CAD/CAE · 根据温度反馈迭代设计**
-
-这组热分析使用另一矩形实体。下图从左至右依次为：10 mm / 5 W，最高 **63.64℃**；14 mm / 5 W，最高 **58.13℃**；14 mm / 4 W，最高 **51.68℃**。
-
-<p>
-  <img src="docs/images/demos/thermal-10mm-5w.png" width="240" alt="10 mm 厚度、5 W 热输入的实际温度云图，最高 63.64 摄氏度">
-  <img src="docs/images/demos/thermal-14mm-5w.png" width="240" alt="厚度改为 14 mm、保持 5 W 的实际温度云图，最高 58.13 摄氏度">
-  <img src="docs/images/demos/thermal-14mm-4w.png" width="240" alt="复用 14 mm 几何和网格、功率改为 4 W 的实际温度云图，最高 51.68 摄氏度">
-</p>
-
-厚度由 10 mm 改为 14 mm 后满足预定的 **60℃** 判据；随后只改变热输入，复用几何和网格完成新求解。三张云图使用各自色标，请以上述数值比较。[图片来源、工况与验证范围](docs/demo-gallery.md)
-
 ## 本地使用
 
-需要 Python 3.11+（当前验证环境为 Python 3.14）。EDS 记录与检索核心无第三方运行依赖；实际执行另需所选 Skill 和 MCP 的运行环境。
+需要 Python 3.11+（当前验证环境为 Python 3.14）。EDS 记录与检索核心无第三方运行依赖；实际执行另需所选 Skill 和 MCP 的运行环境。需要关系检索时，可按[SQLite + GraphQLite 指南](docs/graph-knowledge.md)安装可选图索引；它不会替换现有 SQLite/FTS5，也不会改变默认检索路径。
 
 ### 给安装 Agent 的步骤
 
@@ -93,6 +113,21 @@ python -m eds doctor
 python -m eds study ./workspaces/my-study init --goal "研究支架的建模表达" --mode cad
 python -m eds study ./workspaces/my-study resume
 ```
+
+若要启用 GraphQLite 图检索，在隔离虚拟环境中安装可选依赖：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+.\.venv\Scripts\python.exe -m pip install -r requirements-graph.txt
+python -m eds doctor --graph
+```
+
+macOS/Linux 使用 `source .venv/bin/activate`，再执行 `python -m pip install -r requirements-graph.txt`
+和 `python -m eds doctor --graph`。后续图命令默认在这个已激活的虚拟环境中执行。
+GraphQLite 0.9.4 提供 Windows x64、Linux x64/ARM64 和 Apple Silicon macOS 预编译包；
+本次仅在 Windows 完成实际验证，Intel Mac 可能需要源码构建。版本与平台边界见
+[SQLite + GraphQLite 指南](docs/graph-knowledge.md)。
 
 安装会复制本工程的四个 Skills 到仓库 `.agents/skills/`，并自动核对、应用已初始化执行 submodule 的登记补丁；不更改全局 Codex 配置。
 重复安装会识别已应用补丁；`--check` 只检查，待应用、版本不符或额外修改会返回失败。不要用强制 checkout/reset 绕过冲突。
@@ -144,6 +179,19 @@ python -m eds kb ./workspaces/knowledge sync
 python -m eds kb ./workspaces/knowledge rebuild
 ```
 
+关系问题可显式维护和查询本机图缓存：
+
+```powershell
+python -m eds kb ./workspaces/knowledge graph-sync
+python -m eds kb ./workspaces/knowledge graph-status
+python -m eds kb ./workspaces/knowledge graph-search "边界条件" --question method-selection --depth 2
+```
+
+也可在维护 SQLite 索引时显式加 `--graph`；图缓存不会在每次偏好、Study 或反馈写入时自动更新。
+图索引缺失、过期或依赖未安装时，`graph-status` 仍返回诊断状态，`graph-search` 会报告原因；
+安装依赖后，`graph-sync` 创建或更新图索引。普通 `search`、`read` 和现有 FTS5
+检索仍可使用。完整边界、跨机同步和查询选择见[SQLite + GraphQLite 指南](docs/graph-knowledge.md)。
+
 `method.md` 必须已经存在于指定知识目录并符合元数据约定。Markdown 保留事实与来源，
 SQLite 为可重建派生数据；库不可用时 Codex 可继续使用当前工程和直接资料。
 
@@ -154,13 +202,22 @@ SQLite 为可重建派生数据；库不可用时 Codex 可继续使用当前工
 它与 `once/auto/later/skip` 抽取频率不同。完整说明见[知识路由](skills/eds-study/references/knowledge.md)、
 [分类纳管](skills/eds-study/references/knowledge-units.md)及[偏好管理](skills/eds-study/references/preferences.md)。
 
-高频工程图执行使用活动预设减少重复检索：首次激活时固定适用的偏好版本，
+建模视图、工程图、CAE 场图和动画交付在制定执行计划前读取适用的已确认偏好。
+活动预设用于减少重复检索：首次激活时固定适用的偏好版本，
 后续任务直接使用预设快照；任务内覆盖只保存在当前 Run，只有显式保存为默认
 才创建新的偏好版本。典型入口为 `python -m eds preset <knowledge-root>
 activate|current|task|save-default`，再把 task 快照随 Run 输入传给执行端。
-执行端只把快照映射到其支持的 DrawingSpec 字段，并报告已应用和未映射项；
+工程图执行端只把快照映射到其支持的 DrawingSpec 字段，并报告已应用和未映射项；
 个人风格不会写入公共 Skill，工程硬约束也不会被快照覆盖。
 具体命令、快照字段和首次激活约束见[活动预设说明](docs/execution-presets.md)。
+
+视图与动画的 Run 还应固定可读性判据：结构与材料能辨认、方向清楚、量与单位明确、
+色标和时间语义一致、来源可追溯，并检查代表帧与最终成片。这是 Codex 按 Skill
+履行的执行交接义务，独立绕过 EDS 的 MCP 客户端不会自动获得这些上下文。
+
+跨领域检索先区分通用实验流程和具体物理方法；默认少量候选、固定版本回读、按需追溯关系。
+散热模型的材料值、液压预算和温降不能直接迁移到磁场或磨损任务；Graph 的路径命中
+只提供查证线索，适用性由 Codex 对照条件判断。详见[跨领域复用与上下文预算](skills/eds-study/references/knowledge.md#cross-domain-transfer-and-context-budget)。
 
 ## 验证与执行接入
 
@@ -192,4 +249,4 @@ python -m eds backend examples/backend.fixture.json check
 用户工程、原生文件、实际知识和私密后端配置应保存在独立工作区；`workspaces/` 和 `local/` 已忽略。
 `output/` 保存本地产物，不随仓库上传；演示文稿的发布版单独保存在根目录。
 历史验证报告中的 `workspaces/` 成果与原始日志链接指向本地留存证据，不随 GitHub 仓库分发；
-公开仓库保留验证摘要、精选演示图片、测试及合成示例，可按上面的命令进行本地功能验证。
+公开仓库保留验证摘要、精选演示视频/GIF、测试及合成示例，可按上面的命令进行本地功能验证。

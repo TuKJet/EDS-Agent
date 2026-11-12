@@ -24,8 +24,9 @@ exports can therefore be added without rewriting every Study.
 
 Method evaluations are equally valuable to tool-execution feedback. Preserve
 the paper or method versions, product feature and operating conditions, parameter
-change, baseline/candidate metrics, and one of `improved`, `degraded`, `no_change`
-or `unverified`. A literature-only assessment remains unverified for the product;
+change, baseline/candidate metrics, and the actual schema values `improved`,
+`degraded`, `mixed`, `unchanged`, `inconclusive` or `not_tested`. A literature-only
+assessment remains unverified for the product (use `not_tested` or `inconclusive`);
 it may guide a candidate experiment but cannot become a verified improvement.
 
 When one source contains several kinds of knowledge, create linked units rather

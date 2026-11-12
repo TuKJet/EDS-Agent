@@ -21,8 +21,8 @@ def binding(domain="cad", fixture=False):
 
 class ExecutionTests(unittest.TestCase):
     def setUp(self):
-        base = Path(__file__).resolve().parent.parent / ".test-tmp"
-        base.mkdir(exist_ok=True)
+        base = Path(__file__).resolve().parent.parent / "output" / "repository-tests" / "tmp"
+        base.mkdir(parents=True, exist_ok=True)
         temporary = tempfile.TemporaryDirectory(dir=base)
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)

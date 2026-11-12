@@ -13,8 +13,8 @@ from eds.study import StudyError, StudyStore
 
 class StudyStoreTests(unittest.TestCase):
     def setUp(self):
-        self.test_root = Path(__file__).resolve().parents[1] / ".test-tmp"
-        self.test_root.mkdir(exist_ok=True)
+        self.test_root = Path(__file__).resolve().parents[1] / "output" / "repository-tests" / "tmp"
+        self.test_root.mkdir(parents=True, exist_ok=True)
         self.tmp = tempfile.TemporaryDirectory(dir=self.test_root)
         self.root = Path(self.tmp.name)
         self.store = StudyStore.create(self.root, "Compare bracket expressions", mode="cad")

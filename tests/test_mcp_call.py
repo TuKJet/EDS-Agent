@@ -16,8 +16,8 @@ import mcp_call
 
 class McpStudyRecordingTests(unittest.TestCase):
     def setUp(self):
-        test_tmp = Path(__file__).resolve().parents[1] / ".test-tmp"
-        test_tmp.mkdir(exist_ok=True)
+        test_tmp = Path(__file__).resolve().parents[1] / "output" / "repository-tests" / "tmp"
+        test_tmp.mkdir(parents=True, exist_ok=True)
         self.tmp = tempfile.TemporaryDirectory(dir=test_tmp)
         self.root = Path(self.tmp.name)
         self.store = StudyStore.create(self.root / "study", "MCP recording", mode="cad")

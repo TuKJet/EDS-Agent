@@ -512,12 +512,17 @@ class StudyStore:
             return copy.deepcopy(matches[-1] if matches else None)
         return copy.deepcopy(entities)
 
-    def add(self, kind: str, payload: dict[str, Any], *, ref: str | None = None) -> dict[str, Any]:
+    def add(self, kind: str, payload: dict[str, Any], *, ref: str | None = None,
+            create_only: bool = False) -> dict[str, Any]:
+        if type(create_only) is not bool:
+            raise StudyError("create_only must be a boolean")
         self._validate_payload(kind, payload)
         with self._lock():
             state = self._read()
             logical, expected_version = self._split_ref(ref or payload.get("ref") or _uid(kind))
             prior = [item for item in state["entities"] if item["logical_ref"] == logical]
+            if create_only and prior:
+                raise StudyError("entity already exists; refusing to replace its identity")
             if prior and prior[-1]["kind"] != kind:
                 raise StudyError("a logical reference cannot change entity kind")
             version = prior[-1]["version"] if prior else 0

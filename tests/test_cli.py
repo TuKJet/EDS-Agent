@@ -12,8 +12,8 @@ from eds.install import REPO_ROOT, execution_skill_status, install_skills
 
 class CLITests(unittest.TestCase):
     def setUp(self):
-        self.temporary_root = REPO_ROOT / ".test-tmp"
-        self.temporary_root.mkdir(exist_ok=True)
+        self.temporary_root = REPO_ROOT / "output" / "repository-tests" / "tmp"
+        self.temporary_root.mkdir(parents=True, exist_ok=True)
 
     def run_cli(self, *args, stdin=None):
         env = {**os.environ, "PYTHONIOENCODING": "utf-8"}

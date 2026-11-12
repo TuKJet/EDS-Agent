@@ -15,14 +15,28 @@ python -m eds data status
 ```
 
 The manifest records only the schema, stable identity, and relative
-`knowledge/`, `studies/` and `assets/` directories. The portable truth is
+`knowledge/`, `studies/`, `products/` and `assets/` directories. The portable truth is
 Markdown and `registry.json`, `study.json`, preset state and deliberately
 selected attachments. SQLite indexes, lock files, temporary files, credentials,
 backend bindings and VM-specific absolute paths are local or rebuildable.
+This includes the optional GraphQLite projection: `graph.sqlite3` is a local,
+rebuildable relationship cache beside the ordinary `index.sqlite3` cache. Do not
+sync either SQLite file as canonical knowledge; after copying the root to another
+computer, run the ordinary index sync/rebuild and then explicitly run
+`kb "@knowledge" graph-sync` if relationship queries are needed. A graph cache may
+be absent on a machine that has only the standard-library core installed.
 For managed Studies, `knowledge/iterations/` is the central, searchable
 experience projection. It keeps fixed Study/Run/evidence references and hashes,
 so later work need not walk old project folders; the Study remains the original
 engineering record.
+Products use the same private root. A product is resolved as `@product/<id>` under
+`studies/products/<id>`; its versioned baseline and statements are the portable record,
+while selected source files are copied by hash below
+`assets/products/<source-study-id>/`. The product store reuses the versioned
+StudyStore design; it is not a second database and does not change the existing
+manifest format. A source revision is immutable once bound to a baseline, so a later
+vendor file cannot silently change an existing Study. Product data is private root
+content, not public Skill content.
 Each data directory includes `.gitkeep` so even initially empty directories
 survive a private Git checkout.
 The local binding is `~/.eds/config.json`; caches and process locks default to
@@ -35,9 +49,12 @@ Use aliases after binding a copied root:
 ```powershell
 python -m eds kb "@knowledge" sync
 python -m eds kb "@knowledge" rebuild
+python -m eds kb "@knowledge" graph-status
+python -m eds kb "@knowledge" graph-sync
 python -m eds preset "@knowledge" current --question drawing
 python -m eds preset "@knowledge" task --question drawing --output batch/style-task.json
 python -m eds study "@study/gearbox" resume
+python -m eds product "@product/gearbox" resume
 ```
 
 `sync` and `rebuild` are local Markdown-to-index operations. They are not remote

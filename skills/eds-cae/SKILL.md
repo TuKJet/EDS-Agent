@@ -33,3 +33,11 @@ For useful history, use `method-selection`, `experiment-design`, or
 `result-interpretation` in the shared knowledge reference. Keep source claims and
 actual validation feedback separate; retrieve linked conditions before reusing a
 result. Do not load CAD drawing preferences to discuss physical hypotheses.
+
+When planning human-facing CAE geometry views, field plots, animations or exports,
+load the applicable CAE presentation preference/preset before the execution brief.
+Carry its fixed snapshot and readability acceptance checks into the Run. Inspect
+representative rendered frames before a long export and the actual final media
+before delivery. Presentation conventions cannot change the solved geometry,
+physics, units or evidence identity. This is a separate trigger from physical-method
+retrieval; do not wait for the user to repeat a confirmed readability preference.

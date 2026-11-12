@@ -21,8 +21,8 @@ def unit(path, uid, version="1", kind="method", relations=None, body="层流模�
 
 class KnowledgeTests(unittest.TestCase):
     def setUp(self):
-        test_root = Path(__file__).resolve().parent.parent / ".test-tmp"
-        test_root.mkdir(exist_ok=True)
+        test_root = Path(__file__).resolve().parent.parent / "output" / "repository-tests" / "tmp"
+        test_root.mkdir(parents=True, exist_ok=True)
         self.temp = tempfile.TemporaryDirectory(dir=test_root, prefix="knowledge-")
         self.root = Path(self.temp.name)
         self.kb = KnowledgeBase(self.root)

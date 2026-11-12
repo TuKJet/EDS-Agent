@@ -58,8 +58,8 @@ class BindingTests(unittest.TestCase):
             prepare_call(self.binding, "edit", {"length": {"value": 2, "unit": "mm"}})
 
     def test_nonfinite_json_rejected_even_in_unknown_metadata(self):
-        temporary_root = Path(__file__).resolve().parent.parent / ".test-tmp"
-        temporary_root.mkdir(exist_ok=True)
+        temporary_root = Path(__file__).resolve().parent.parent / "output" / "repository-tests" / "tmp"
+        temporary_root.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=temporary_root) as directory:
             path = Path(directory) / "binding.json"
             path.write_text('{"unused": NaN}', encoding="utf-8")

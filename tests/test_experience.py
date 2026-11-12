@@ -31,8 +31,8 @@ def state(status="completed"):
 
 class ExperienceTests(unittest.TestCase):
     def setUp(self):
-        temp_root = Path(__file__).resolve().parents[1] / ".test-tmp"
-        temp_root.mkdir(exist_ok=True)
+        temp_root = Path(__file__).resolve().parents[1] / "output" / "repository-tests" / "tmp"
+        temp_root.mkdir(parents=True, exist_ok=True)
         self.temp = tempfile.TemporaryDirectory(dir=temp_root)
         self.root = Path(self.temp.name) / "data"
         self.environment = patch.dict(os.environ, {"EDS_DATA_HOME": str(self.root), "EDS_CACHE_HOME": str(Path(self.temp.name) / "cache")})

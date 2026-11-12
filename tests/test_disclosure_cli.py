@@ -15,8 +15,8 @@ from eds.knowledge import KnowledgeBase
 
 class DisclosureCLITests(unittest.TestCase):
     def setUp(self):
-        temporary_root = REPO_ROOT / ".test-tmp"
-        temporary_root.mkdir(exist_ok=True)
+        temporary_root = REPO_ROOT / "output" / "repository-tests" / "tmp"
+        temporary_root.mkdir(parents=True, exist_ok=True)
         self.temp = tempfile.TemporaryDirectory(dir=temporary_root)
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
