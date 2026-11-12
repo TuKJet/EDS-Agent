@@ -4,23 +4,31 @@
   "cae": {
     "media": [
       {
-        "file": "liquid-cooling-comparison.mp4",
-        "bytes": 1608061,
-        "sha256": "3c233ef3bd18cf6752b1e59c64da3995bde45e431b9249d716945f723b0a3f9c",
-        "source": "output/COMSOL双四层堆叠液冷优化-20261111/comparison_startup_v1/B_to_E_comparison.mp4",
-        "transformation": "FFmpeg scale 1280x960 Lanczos; H.264 CRF 27 preset slow; 20 fps; yuv420p; no audio; faststart",
-        "source_sha256": "eb64e636353a55d5e403e25e12b60544262b65644d8f0da9e3b0a50bef8b3140",
-        "source_bytes": 7354168,
-        "width": 1280,
-        "height": 960,
-        "full_decode_pass": true
-      },
-      {
         "file": "liquid-cooling-poster.png",
         "bytes": 274119,
         "sha256": "de4565be1b4fe633ded0a573a40f01b4f3eefcb03f9accac9c4c7f2360589663",
         "source": "output/COMSOL双四层堆叠液冷优化-20261111/comparison_startup_v1/comparison_poster.png",
         "transformation": "byte-identical copy"
+      },
+      {
+        "file": "liquid-cooling-comparison.gif",
+        "bytes": 4360040,
+        "sha256": "ca67b07f590eff1c17da60beba212073a9ca7d7c7b898e0f72b3a97db3052db4",
+        "source": "output/COMSOL双四层堆叠液冷优化-20261111/comparison_startup_v1/B_to_E_comparison.mp4",
+        "source_sha256": "eb64e636353a55d5e403e25e12b60544262b65644d8f0da9e3b0a50bef8b3140",
+        "transformation": "FFmpeg fps=6, scale=960:-1 Lanczos, 96-color diff palette, Bayer dither scale 3, rectangle diff, infinite loop; full timeline preserved",
+        "width": 960,
+        "height": 720,
+        "frames": 193,
+        "duration_ms": 32170,
+        "decoded_unique_frames": 165,
+        "loop": 0,
+        "full_decode_pass": true,
+        "intermediate_encoding": {
+          "sha256": "3c233ef3bd18cf6752b1e59c64da3995bde45e431b9249d716945f723b0a3f9c",
+          "transformation": "FFmpeg scale 1280x960 Lanczos; H.264 CRF 27 preset slow; 20 fps; yuv420p; no audio; faststart",
+          "retained_in_publication": false
+        }
       }
     ],
     "source_records": [
@@ -90,11 +98,6 @@
   },
   "cad": {
     "media": [
-      {
-        "file": "engine-motion-exploded.mp4",
-        "bytes": 195497,
-        "sha256": "2d190e069f0f96d66c26ccd3c21e97ce93692f1c40d25301a7eb705a28dab33b"
-      },
       {
         "file": "engine-motion-exploded.gif",
         "bytes": 1113620,
@@ -385,7 +388,7 @@
       "capture_method": "Existing VM1 SolidWorks MCP for connect/open/inspect, then task-local native COM batch capture using SolidWorks SaveBMP.",
       "no_synthetic_geometry": true
     },
-    "postprocessing": "Caption panels and resize only; H.264 CRF 27, 1280x800, 15 fps, no audio, faststart; GIF 864x540, 12 fps, 96-color palette. No screenshot slicing or external STEP rendering in the published media.",
+    "postprocessing": "Caption panels and resize only; GIF 864x540, 12 fps, 96-color palette. No screenshot slicing or external STEP rendering in the published media.",
     "validation": {
       "motion": {
         "piston_sampled_ranges_mm": {

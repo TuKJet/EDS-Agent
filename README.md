@@ -19,7 +19,7 @@ GraphQLite 可按需提供有界关系追溯。真实 CAD/CAE 操作通过用户
 
 ![四缸发动机运行后展开零件的连续展示](docs/media/demos/engine-motion-exploded.gif)
 
-[观看发动机展示视频（MP4，10 秒，约 195 KB）](docs/media/demos/engine-motion-exploded.mp4) · 上方 GIF 约 1.11 MB。
+循环 GIF 时长约 10 秒，体积约 1.11 MB。
 
 本次在 SolidWorks 中重新计算运动并导出原生帧，已验证原生运动与交付包重开。当前是产品概念与机构展示，气门仍为静态示意；
 爆炸位移用于讲解结构，不代表拆装工艺或制造放行。
@@ -28,11 +28,11 @@ GraphQLite 可按需提供有界关系追溯。真实 CAD/CAE 操作通过用户
 
 对 **两组 × 四层 Die、总热功率 600 W** 的液冷模型，Agent 从浅直道基线迭代到
 加深直通道，再比较 **624 根铜柱**方案，并复核能量收支、网格敏感性和数值方法。
-32 秒视频同时显示散热结构、液体流向和开机升温，结尾给出 COMSOL 原生热点对比。
+32 秒动画同时显示散热结构、液体流向和开机升温，结尾给出 COMSOL 原生热点对比。
 
-[![点击查看多 Die 液冷优化对比视频](docs/media/demos/liquid-cooling-poster.png)](docs/media/demos/liquid-cooling-comparison.mp4)
+![多 Die 液冷结构、流向与开机升温对比动画](docs/media/demos/liquid-cooling-comparison.gif)
 
-**[观看液冷对比视频（MP4，32 秒，约 1.6 MB）](docs/media/demos/liquid-cooling-comparison.mp4)**
+循环 GIF 时长约 32 秒，体积约 4.36 MB。
 
 在相同冷板液压功率约 **0.008519 W** 下，主比较的最高 Die 温度由 **167.84℃**
 降至 **153.27℃**（降低 **14.57 K**）；压力阶次交叉复核得到 **155.55℃**，

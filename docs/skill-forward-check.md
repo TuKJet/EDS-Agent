@@ -25,7 +25,8 @@ CAE 任务上轮提交时聊天中断，记录为 submitting 且缺 task_id。�
 独立检查同时发现绑定 JSON 对非有限值的接收缺口，已经改为严格解析并加入回归测试。
 安装器保留仓库范围检查，并明确拒绝链接/重解析路径；四个 Skills 已安装到本工程，
 安装副本与源文件一致性由 `python -m eds install-skills --check` 检查。
-完整原始离线检查记录位于开发工作区 `.test-tmp/forward-review/README.md`，其中测试数量属于早期快照；
+原始离线检查说明保留于开发工作区 `output/repository-tests/evidence/skill-forward-check-20261102.md`，
+其中测试数量属于早期快照；其余一次性测试产物已清理。
 最终测试结果以 [本地验证报告](validation-report.md) 为准。
 
 ## 逐级披露修订检查（2026-11-02）
