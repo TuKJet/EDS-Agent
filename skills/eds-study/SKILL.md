@@ -41,17 +41,30 @@ repository test scratch belongs in `output/repository-tests/` and should use an
 automatically cleaned temporary directory. Formal portable records keep their
 configured data root; this convention does not relocate existing product assets.
 
-At completion, reconcile active/unknown runs before cleanup. Retain deliverables,
-editable source models and dependencies, fixed input versions, Study/Run records,
-cited evidence, validation results and the scripts needed to reproduce them.
-Remove owned, unreferenced scratch files that have no reuse value: disposable
-fixtures, staging copies, redundant exports and regenerable caches or frame sets
-after final-media validation. Inspect references and native model dependencies
-first; an original export bound as Evidence is not disposable scratch. Do not
-delete user originals, another task's files, shared configuration or unresolved
-failure evidence. Keep uncertain items and state why. Verify cleanup targets stay
-inside the owned task directory; do not blanket-delete `output/` or infer that
-ignored files are expendable. Report retained results and any deferred cleanup.
+For agent-generated experiment models, use final-per-scheme retention: keep each
+scheme's final model and necessary verification models, including distinct final
+steady/transient uses, mesh/order checks and diagnostic endpoints when needed.
+An invalid or unrun endpoint keeps its original status; newest timestamp alone
+does not establish a final model. Keep their dependencies and user source inputs.
+Clear superseded intermediate models and disposable staging/export copies after
+accepted iteration checkpoints and at completion, rather than accumulating them
+until a VM fills up. This does not authorize deleting another task's files.
+
+Preserve Study/Run/Evidence/Assessment records, fixed input identities, metrics,
+validation, reproduction scripts, deliverables and graph nodes/edges. Removing a
+model file must not erase or rewrite the experiment history. Before deletion,
+record the exact paths, retained replacements, evidence refs and availability in
+a lifecycle manifest; after deletion, append receipts and an explicit removed or
+archived disposition. A graph reference can survive a file's deletion but must
+not imply that the file is still loadable. Keep unique unresolved failure evidence
+until its required observations have been preserved or its retention is resolved.
+
+Read [model retention](references/model-retention.md) when planning model-producing
+execution, reconciling storage or closing an experiment. It defines the disk budget,
+dependency/live-run checks, scoped deletion and later retrieval rules. Apply the
+authorized cleanup policy without repeated routine approval; preserve active or
+uncertain files and report the specific exception. Do not blanket-delete output
+directories or treat ignored files as expendable.
 
 ## Load only for the current action
 

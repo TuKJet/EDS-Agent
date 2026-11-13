@@ -46,10 +46,13 @@ Provide only the information needed for the assigned action:
   what is read-only; required result location. The agent is not alone in the workspace
   and must preserve other agents' changes.
 - File lifecycle: the task's `output/<case-or-task>/` (or explicit external workspace),
-  scratch subdirectory, retained deliverables/evidence and cleanup owner. Use the
-  same separation in the selected remote workspace. Return artifact paths and
-  dependencies before cleanup; follow the shared Study completion rules, including
-  preserving referenced native outputs and reconciling unfinished runs first.
+  scratch subdirectory, final-per-scheme/verification model roles, retained evidence,
+  cleanup owner and disk allowance for the next solve/save/export. Use the same
+  separation in the selected remote workspace. Read [model retention](model-retention.md);
+  return dependencies and lifecycle manifests, clean eligible intermediates at
+  accepted checkpoints and completion, and preserve records and graph references.
+  Resolve prior lifecycle dispositions before loading historical model paths;
+  reconcile unfinished runs and exclude live recovery/configuration first.
 
 For setup/probe there may be no experiment yet: record the question and do only the
 authorized discovery. Missing capabilities return a bounded finding, not invented
@@ -132,6 +135,9 @@ Return a short result with these fields; files hold the full supporting detail:
   quality checks that affect interpretation; distinguish missing from zero.
 - **Evidence:** exact record/artifact paths or URIs, versions/hashes and useful
   locators. Preserve relevant warnings and errors, not just a success label.
+- **Storage:** retained final/verification models, cleanup manifest and receipts,
+  actual reclaimed/remaining space, and deferred files with reasons. Distinguish
+  preserved historical references from physically available model files.
 - **Decision needed:** remaining uncertainty, capability gaps or proposed scope
   change. Suggestions are not an already-selected next experiment.
 
