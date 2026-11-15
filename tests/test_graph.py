@@ -19,10 +19,10 @@ def make_unit(path, uid, body="gear housing thermal design", relations=None, kin
     path.write_text("<!-- eds-knowledge: " + json.dumps(meta, ensure_ascii=False) + " -->\n" + body, encoding="utf-8")
 
 
-def make_experience(root, uid="iteration", evaluations=None):
-    """Create a valid central experience snapshot plus its registered projection."""
+def make_experience(root, uid="iteration", evaluations=None, schema="eds-experience/v1"):
+    """Create a valid central experience record plus its registered projection."""
     evidence = [{"ref": "evidence@1", "kind": "evidence", "details": {"observation": "measured"}}]
-    record = {"schema": "eds-experience/v1", "id": uid, "version": 1, "study_id": "study",
+    record = {"schema": schema, "id": uid, "version": 1, "study_id": "study",
               "assessment_ref": "assessment@1", "title": uid, "context": {},
               "actions": {"run_statuses": [], "runs": []}, "observations": {"entities": evidence},
               "analysis": {}, "guidance": {"status": "unverified"}, "method_evaluations": evaluations or [],
@@ -34,7 +34,7 @@ def make_experience(root, uid="iteration", evaluations=None):
     digest = hashlib.sha256(snapshot.encode()).hexdigest()
     meta = {"id": uid, "version": "1", "type": "feedback", "title": uid, "date": "2026-11-10",
             "attribution": "test", "sources": [{"uri": source.relative_to(root).as_posix(), "locator": "$", "sha256": digest}],
-            "conditions": {}, "relations": [], "data_schema": "eds-experience/v1"}
+            "conditions": {}, "relations": [], "data_schema": schema}
     md = root / f"{uid}.md"
     md.write_text("<!-- eds-knowledge: " + json.dumps(meta, ensure_ascii=False) + " -->\niteration", encoding="utf-8")
     return md, source
@@ -66,6 +66,21 @@ class GraphTests(unittest.TestCase):
             with self.assertRaises(GraphError):
                 graph.sync()
             self.assertFalse(absent.exists())
+
+    def test_source_reader_accepts_legacy_and_ledger_without_graph_runtime(self):
+        graph = KnowledgeGraph(self.kb)
+        for suffix in ("v1", "v2"):
+            md, source = make_experience(self.root, uid=suffix, schema="eds-experience/" + suffix)
+            self.kb.register(md)
+            docs, missing = self.kb._documents([md.name])
+            self.assertFalse(missing)
+            loaded = graph._experience(docs[md.name])
+            self.assertEqual(loaded["record"]["schema"], "eds-experience/" + suffix)
+            snapshot = graph._source_snapshot([md.name], docs)
+            self.assertEqual(snapshot["experience_sources"][0]["uri"], source.relative_to(self.root).as_posix())
+            source.write_bytes(source.read_bytes().replace(b'"analysis":{}', b'"analysis":{"tampered":true}'))
+            with self.assertRaisesRegex(GraphError, "hash mismatch"):
+                graph._experience(docs[md.name])
 
     def test_graphqlite_projection_and_relation_recall(self):
         require_graphqlite(self)

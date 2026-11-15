@@ -77,8 +77,10 @@ class CentralExperienceTests(unittest.TestCase):
         self.assertEqual(status["pending_count"], 1)
         self.assertIn("fixture disk", status["pending"][0]["error"])
         self.assertEqual(study.get_run(run["run_id"])["status"], "failed")
-        queued = next(item["record"] for item in study.read()["events"]
-                      if item["type"] == "experience_publication" and item["status"] == "pending")
+        from eds.experience import build_iteration
+        queued = build_iteration(study.read(), assessment['ref'])
+        self.assertTrue(all('record' not in item for item in study.read()['events']
+                            if item['type'] == 'experience_publication'))
         study.update_context(goal="Later unrelated goal")
         from eds.experience import publish_iteration
         with patch("eds.experience.publish_iteration", wraps=publish_iteration) as publish:
@@ -86,6 +88,46 @@ class CentralExperienceTests(unittest.TestCase):
             self.assertEqual(publish.call_args.args[1], queued)
         self.assertEqual(result["pending_count"], 0)
         self.assertEqual(study.get_run(run["run_id"])["status"], "failed")
+
+    def test_destination_aliases_share_one_publication_and_no_snapshot(self):
+        study = StudyStore.create('@study/aliases', 'Small ledger', mode='cae')
+        assessment, _ = self.create_assessment(study)
+        before = study.path.stat().st_size
+        target = self.data/'knowledge'
+        relative = os.path.relpath(target, Path.cwd())
+        for destination in [str(target),relative,'@knowledge']:
+            result=study.publish_experiences(assessment_ref=assessment['ref'],knowledge_root=destination)
+            self.assertEqual(result['published_count'],1)
+            self.assertEqual(result['pending_count'],0)
+        self.assertEqual(study.path.stat().st_size,before)
+        self.assertTrue(all('record' not in e and 'assessment_snapshot' not in e
+                            for e in study.read()['events'] if e['type']=='experience_publication'))
+
+    def test_backfill_handles_queue_without_record_and_does_not_mutate_study(self):
+        study = StudyStore.create('@study/backfill-ledger', 'Keep only publication identity', mode='cae')
+        with patch('eds.experience.publish_iteration', side_effect=OSError('offline')):
+            with self.assertWarns(RuntimeWarning):
+                assessment, _ = self.create_assessment(study)
+        before = study.path.read_bytes()
+        result = study.backfill_experiences(assessment_ref=assessment['ref'])
+        self.assertEqual(result['published_count'], 1)
+        self.assertEqual(result['failed_count'], 0)
+        self.assertEqual(study.path.read_bytes(), before)
+
+    def test_backdated_observation_does_not_change_pending_knowledge(self):
+        from eds.experience import build_iteration
+        study=StudyStore.create('@study/backdated', 'Observe then assess',mode='cae')
+        exp=study.add('experiment',{'question':'q','observations':['amplitude'],'decision_rule':'compare'})
+        run=study.add_run(experiment_ref=exp['ref'],input_refs=[],backend='fixture',capability='solve',input_snapshot={},idempotency_key='pending')
+        study.transition_run(run['run_id'],'submitting')
+        evidence=study.add('evidence',{'source':'fixture:observation','run_id':run['run_id'],'observation':'pending'})
+        with patch('eds.experience.publish_iteration',side_effect=OSError('offline')):
+            with self.assertWarns(RuntimeWarning):
+                a=study.add('assessment',{'evidence_refs':[evidence['ref']],'interpretation':'Still pending','next_action':'query'})
+        old=build_iteration(study.read(),a['ref'])
+        study.transition_run(run['run_id'],'completed',output={'A1':3},observed_at=run['created_at'])
+        self.assertEqual(build_iteration(study.read(),a['ref']),old)
+        self.assertEqual(study.publish_experiences()['pending_count'],0)
 
     def test_legacy_project_requires_binding_or_explicit_backfill(self):
         study = StudyStore.create(self.workspace / "legacy", "Legacy research", mode="cae")

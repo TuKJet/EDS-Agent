@@ -26,9 +26,65 @@ class ExistingRunError(RuntimeError):
                          "idempotent MCP run already exists with status " + run["status"])
 
 
+def _arguments_hash(snapshot):
+    """Semantic request identity works for old inline and new receipt records."""
+    if "arguments_sha256" in snapshot:
+        return snapshot["arguments_sha256"]
+    if "arguments" not in snapshot:
+        return None
+    return hashlib.sha256(_argument_bytes(snapshot["arguments"])).hexdigest()
+
+
+def _argument_bytes(data):
+    return json.dumps(data, ensure_ascii=False, sort_keys=True,
+                      separators=(",", ":"), allow_nan=False).encode("utf-8")
+
+
 def _action_snapshot(snapshot):
-    """Exclude the local evidence destination from action identity."""
-    return {key: value for key, value in snapshot.items() if key != "output_path"}
+    """Paths and previews describe evidence; only exact arguments identify actions."""
+    result = {key: value for key, value in snapshot.items()
+              if key not in {"output_path", "arguments", "arguments_sha256",
+                             "arguments_source", "argument_summary"}}
+    result["arguments_sha256"] = _arguments_hash(snapshot)
+    return result
+
+
+def _argument_summary(data, depth=0):
+    if isinstance(data, dict) and depth < 3:
+        result = {}
+        for key, value in list(data.items())[:20]:
+            summary = _argument_summary(value, depth + 1)
+            if summary is not None:
+                candidate = {**result, key: summary}
+                if len(_argument_bytes(candidate)) <= 2048:
+                    result[key] = summary
+        return result or None
+    if data is None or isinstance(data, (bool, int, float)):
+        return data
+    if isinstance(data, str) and len(data) <= 160:
+        return data
+    if isinstance(data, list) and len(data) <= 8 and len(_argument_bytes(data)) <= 512:
+        return data
+    return None
+
+
+def _argument_record(args, data):
+    canonical = _argument_bytes(data)
+    result = {"arguments_sha256": hashlib.sha256(canonical).hexdigest()}
+    if len(canonical) <= 4096:
+        result["arguments"] = data
+        return result
+    # The CLI already requires a source file. Reference it rather than creating
+    # another full input copy in every Run or knowledge publication.
+    path = Path(args.data)
+    raw = path.read_bytes()
+    if _argument_bytes(json.loads(raw.decode("utf-8-sig"))) != canonical:
+        raise ValueError("argument file changed after loading; operation was not sent")
+    result["arguments_source"] = {"uri": str(path.resolve()), "bytes": len(raw),
+                                  "sha256": hashlib.sha256(raw).hexdigest(),
+                                  "media_type": "application/json"}
+    result["argument_summary"] = _argument_summary(data) or {}
+    return result
 
 
 # The helper is normally launched as a file, so make the repository package
@@ -52,6 +108,19 @@ def _validate_url(value):
         raise ValueError("use a plain HTTP(S) MCP URL without credentials, query or fragment")
 
 
+def _save_result_artifact(path, result):
+    """Persist the complete response before recording its compact receipt."""
+    payload = (json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False) + "\n").encode("utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # The destination must remain unique even if it appeared during the call.
+    with path.open("xb") as stream:
+        stream.write(payload)
+        stream.flush()
+        os.fsync(stream.fileno())
+    return {"uri": str(path.resolve()), "bytes": len(payload),
+            "sha256": hashlib.sha256(payload).hexdigest(), "media_type": "application/json"}
+
+
 def _prepare_run(args, tool_name, data, output_path):
     if not args.study_root or not args.experiment_ref:
         return None, None
@@ -73,7 +142,7 @@ def _prepare_run(args, tool_name, data, output_path):
             "query_tool": cap.get("query_tool"), "task_id_field": cap.get("task_id_field"),
             "read_only": read_only,
         }
-    input_snapshot = {"tool": tool_name, "arguments": data,
+    input_snapshot = {"tool": tool_name, **_argument_record(args, data),
                       "server_url": args.url, "expected_server": args.expected_server,
                       **binding_snapshot}
     canonical = json.dumps(
@@ -96,7 +165,7 @@ def _prepare_run(args, tool_name, data, output_path):
             existing.get("capability") == capability and
             {**_action_snapshot(existing.get("input_snapshot", {})),
              "read_only": existing.get("input_snapshot", {}).get("read_only", False)}
-            == {**input_snapshot, "read_only": read_only}
+            == {**_action_snapshot(input_snapshot), "read_only": read_only}
         )
         if not same_request:
             raise ExistingRunError(existing, "idempotency key reused with a different request")
@@ -122,7 +191,7 @@ def _prepare_run(args, tool_name, data, output_path):
         while any(prior.get("idempotency_key") == f"{base_key}:retry-{ordinal}" for prior in runs):
             ordinal += 1
         key = f"{base_key}:retry-{ordinal}"
-    for prior in store.read().get("runs", []):
+    for prior in runs:
         snapshot = prior.get("input_snapshot", {})
         prior_identity = ((prior.get("backend") == "mcp" and prior.get("capability") == tool_name) or
                           (binding and prior.get("backend") == binding["id"] and
@@ -131,18 +200,18 @@ def _prepare_run(args, tool_name, data, output_path):
                         (not snapshot.get("expected_server") and snapshot.get("server_url") == args.url))
         if (prior.get("idempotency_key") != key and prior_identity and
                 prior.get("experiment_ref") == experiment_ref and prior.get("input_refs") == input_refs and
-                snapshot.get("tool") == tool_name and snapshot.get("arguments") == data and
+                snapshot.get("tool") == tool_name and _arguments_hash(snapshot) == _arguments_hash(input_snapshot) and
                 server_match and
                 prior.get("status") in {"submitting", "submitted", "running", "unknown"}):
             raise ExistingRunError(
                 prior, "idempotent legacy MCP run already exists with status " + prior["status"])
-    for prior in store.read().get("runs", []):
+    for prior in runs:
         snapshot = prior.get("input_snapshot", {})
         prior_server = snapshot.get("expected_server") or snapshot.get("server_url")
         if (prior.get("experiment_ref") == experiment_ref and
                 snapshot.get("tool") == tool_name and
                 prior_server == current_server and
-                snapshot.get("arguments") == data and
+                _arguments_hash(snapshot) == _arguments_hash(input_snapshot) and
                 prior.get("status") in {"submitting", "submitted", "running", "unknown"}):
             raise ExistingRunError(prior, "matching MCP action is pending or uncertain; query the existing run before retrying")
     run = store.add_run(
@@ -305,6 +374,8 @@ def main():
     parser.add_argument("--token-env", default="EDS_MCP_TOKEN")
     parser.add_argument("--timeout", type=float, default=120)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--record-output", choices=("inline", "artifact"), default="artifact",
+                        help="Store the full response in the Run, or only a receipt for --output (default: artifact)")
     parser.add_argument("--study-root", type=Path, default=None)
     parser.add_argument("--experiment-ref", default=None)
     parser.add_argument("--input-ref", action="append", default=[])
@@ -332,6 +403,7 @@ def main():
     protocol_acknowledged = False
     invoke_started = False
     result = None
+    task_id = None
     try:
         _validate_url(args.url)
         if args.binding_path:
@@ -372,10 +444,21 @@ def main():
             run_status, task_id = "unknown", None
         else:
             run_status, task_id = "completed", None
+        recorded_output = result
+        if args.record_output == "artifact":
+            receipt = _save_result_artifact(path, result)
+            recorded_output = {
+                "recording": "artifact", "result_artifact": receipt,
+                "tool_error": tool_error, "operation_failed": operation_failed,
+                **{key: result[key] for key in (
+                    "server_name", "tool", "tool_sent", "preflight_rejected",
+                    "preflight_error", "tool_schema_sha256") if key in result},
+            }
         if run_store is not None:
-            run = run_store.transition_run(run["run_id"], run_status, task_id=task_id, output=result)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+            run = run_store.transition_run(run["run_id"], run_status, task_id=task_id, output=recorded_output)
+        if args.record_output == "inline":
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")
         summary = {"evidence": str(path.resolve()), "protocol_completed": True,
                    "tool_error": tool_error, "operation_failed": operation_failed,
                    "preflight_rejected": preflight_rejected,
@@ -385,6 +468,7 @@ def main():
                    "preflight_outcome": ("rejected" if preflight_rejected else
                                          ("passed" if args.action == "call" else "not_applicable")),
                    "recording": "recorded" if run_store is not None else "unrecorded",
+                   "record_output": args.record_output,
                    "run_status": run_status, "requires_query": run_status in {"submitted", "unknown"},
                    "engineering_success": "requires_assessment"}
         if task_id is not None:
@@ -418,7 +502,8 @@ def main():
         if secret := os.environ.get(args.token_env):
             message = message.replace(secret, "[redacted]")
         if run_store is not None and run is not None and run["status"] == "submitting":
-            run = run_store.transition_run(run["run_id"], "unknown", output={"error": type(exc).__name__, "message": message[:500]})
+            run = run_store.transition_run(run["run_id"], "unknown", task_id=task_id,
+                                           output={"error": type(exc).__name__, "message": message[:500]})
         if result is not None:
             tool_sent = result.get("tool_sent", False)
             preflight_rejected = result.get("preflight_rejected", False)

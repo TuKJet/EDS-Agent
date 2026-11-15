@@ -1,8 +1,8 @@
 """Model-independent publication of reusable engineering experience.
 
-This module deliberately keeps the source Study snapshot separate from the
-derived Markdown knowledge unit.  No model, embedding or endpoint selection is
-performed here; downstream retrieval/training projections can be rebuilt.
+The central ledger carries scientific conditions, evidence and decisions, not
+copies of transport scripts, solver responses or Run histories. No model,
+embedding or endpoint selection is performed here.
 """
 from __future__ import annotations
 
@@ -16,16 +16,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .knowledge import KnowledgeBase, KnowledgeError
+from .knowledge import KnowledgeBase, KnowledgeError, META_RE
 
 
-SCHEMA = "eds-experience/v1"
+SCHEMA = "eds-experience/v2"
+SUPPORTED_SCHEMAS = {"eds-experience/v1", SCHEMA}
 _REF_RE = re.compile(r"^(.+)@(\d+)$")
 _KNOWLEDGE_REF_RE = re.compile(r"^[^@\s]+@[^@\s]+$")
 _ENTITY_KINDS = {"design", "proposal", "realization", "experiment", "evidence", "assessment", "mapping", "decision"}
 _ENTITY_REF_FIELDS = {f"{kind}_{suffix}" for kind in _ENTITY_KINDS for suffix in ("ref", "refs")} | {"refs", "input_refs", "candidate_refs"}
 _STATUSES = {"planned", "submitting", "submitted", "running", "unknown", "completed", "failed", "cancelled"}
 _BLOCKED_VERIFIED = {"planned", "submitting", "submitted", "running", "unknown"}
+_RUN_LEDGER_FIELDS = {"run_id", "experiment_ref", "input_refs", "status", "task_id",
+                      "backend", "capability", "created_at", "updated_at", "temporal_status", "source"}
 
 
 class ExperienceError(ValueError):
@@ -140,30 +143,41 @@ def _runs_for(state: dict[str, Any], closure: list[dict[str, Any]], assessment: 
             continue
         linked = run.get("experiment_ref") in refs or run.get("run_id") in explicit_ids
         if linked:
-            item = copy.deepcopy(run)
+            item = _run_ledger(run, state.get("study_id"))
             if not cutoff or not created:
                 item["temporal_status"] = "unknown"
-            history = item.get("history")
+            history = run.get("history")
             if cutoff and isinstance(history, list):
-                dated = [(entry, _time(entry.get("at"))) for entry in history if isinstance(entry, dict)]
-                item["history"] = [entry for entry, when in dated if when and when <= cutoff]
-                undated = [entry for entry, when in dated if when is None]
-                if undated:
-                    item["unplaced_history"] = undated
+                dated = [(i, entry, _time(entry.get("at")),
+                          _time(entry.get("recorded_at", entry.get("at"))))
+                         for i, entry in enumerate(history) if isinstance(entry, dict)]
+                retained = [(i, entry) for i, entry, when, recorded in dated
+                            if when and recorded and when <= cutoff and recorded <= cutoff]
+                if any(when is None or recorded is None for _, _, when, recorded in dated):
                     item["temporal_status"] = "unknown"
-                retained = item["history"]
-                item["status"] = retained[-1]["status"] if retained else "unknown"
-                item["task_id"] = retained[-1].get("task_id") if retained else None
-                item["updated_at"] = retained[-1]["at"] if retained else None
-                item["output"] = next((entry.get("output") for entry in reversed(retained)
-                                       if entry.get("output") is not None), None)
+                last = retained[-1][1] if retained else {}
+                item["status"] = last.get("status", "unknown")
+                item["task_id"] = last.get("task_id")
+                item["updated_at"] = last.get("at")
+                item["source"]["observation_index"] = retained[-1][0] if retained else None
                 if not retained:
                     item["temporal_status"] = "unknown"
             elif cutoff:
-                item.update(status="unknown", output=None, task_id=None, updated_at=None, temporal_status="unknown")
+                item.update(status="unknown", task_id=None, updated_at=None, temporal_status="unknown")
+                item["source"]["observation_index"] = None
             selected.append(item)
     selected.sort(key=lambda item: (item.get("created_at", ""), item.get("run_id", "")))
     return selected
+
+
+def _run_ledger(run: dict[str, Any], study_id: str | None = None) -> dict[str, Any]:
+    """Select Run identity and interpretation state without copying raw payloads."""
+    item = {key: copy.deepcopy(value) for key, value in run.items() if key in _RUN_LEDGER_FIELDS}
+    if "source" not in item:
+        history = run.get("history")
+        item["source"] = {"study_id": study_id, "run_id": run.get("run_id"),
+                          "observation_index": len(history) - 1 if isinstance(history, list) and history else None}
+    return item
 
 
 def _close_run_entities(state: dict[str, Any], closure: list[dict[str, Any]], runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -213,7 +227,7 @@ def _guidance(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_iteration(record: dict[str, Any]) -> dict[str, Any]:
-    if not isinstance(record, dict) or record.get("schema") != SCHEMA:
+    if not isinstance(record, dict) or record.get("schema") not in SUPPORTED_SCHEMAS:
         raise ExperienceError("unsupported experience schema")
     for key in ("id", "version", "study_id", "assessment_ref", "title", "context", "actions",
                 "observations", "analysis", "guidance", "reuse", "provenance"):
@@ -238,6 +252,8 @@ def validate_iteration(record: dict[str, Any]) -> dict[str, Any]:
             raise ExperienceError("verified guidance requires validation_refs")
     statuses = record["actions"].get("run_statuses", [])
     runs = record["actions"].get("runs", [])
+    if record["schema"] == SCHEMA and any(not isinstance(run, dict) or set(run) - _RUN_LEDGER_FIELDS for run in runs):
+        raise ExperienceError("v2 Run ledger accepts identity and state metadata only")
     actual_statuses = [run.get("status") for run in runs if isinstance(run, dict)]
     if statuses != actual_statuses:
         raise ExperienceError("actions.run_statuses must match actions.runs")
@@ -283,6 +299,26 @@ def validate_iteration(record: dict[str, Any]) -> dict[str, Any]:
     normalized = copy.deepcopy(record)
     normalized.setdefault("method_evaluations", [])
     return normalized
+
+
+def compact_iteration(record: dict[str, Any]) -> dict[str, Any]:
+    """Convert a legacy representation without changing its scientific version.
+
+    This pure conversion does not overwrite a publication. Migration callers
+    must separately record old/new hashes and update the Markdown source link.
+    """
+    validate_iteration(record)
+    compact = {key: copy.deepcopy(value) for key, value in record.items() if key != "actions"}
+    compact["actions"] = {key: copy.deepcopy(value) for key, value in record["actions"].items() if key != "runs"}
+    compact["actions"]["runs"] = [_run_ledger(run, record["study_id"]) for run in record["actions"].get("runs", [])]
+    if "assessment" in compact["analysis"]:
+        assessment = next((item for item in compact["observations"].get("entities", [])
+                           if item.get("ref") == record["assessment_ref"] and item.get("kind") == "assessment"), None)
+        if assessment is None or assessment.get("payload") != compact["analysis"]["assessment"]:
+            raise ExperienceError("analysis.assessment is not a duplicate of the Assessment entity")
+        del compact["analysis"]["assessment"]
+    compact["schema"] = SCHEMA
+    return validate_iteration(compact)
 
 
 def _context_as_of(state, assessment):
@@ -364,7 +400,7 @@ def build_iteration(state: dict[str, Any], assessment_ref: str) -> dict[str, Any
                     "run_ids": [run.get("run_id") for run in runs if run.get("run_id")],
                     "run_statuses": [run.get("status") for run in runs], "runs": runs},
         "observations": {"entities": closure, "missing_refs": missing},
-        "analysis": {"assessment": copy.deepcopy(payload), "interpretation": copy.deepcopy(payload.get("interpretation")) if isinstance(payload, dict) else None,
+        "analysis": {"interpretation": copy.deepcopy(payload.get("interpretation")) if isinstance(payload, dict) else None,
                      "interpretation_type": "assessment_judgment",
                      "next_action": copy.deepcopy(payload.get("next_action")) if isinstance(payload, dict) else None},
         "guidance": guidance,
@@ -418,19 +454,11 @@ def _brief(value):
         return value
     return {"preview": encoded[:1800], "truncated": True,
             "characters": len(encoded), "sha256": hashlib.sha256(encoded.encode()).hexdigest(),
-            "full_value": "central JSON snapshot"}
+            "full_value": "central structured record"}
 
 
 def _compact_run(run: dict[str, Any]) -> dict[str, Any]:
-    snapshot = run.get("input_snapshot", {}) if isinstance(run.get("input_snapshot"), dict) else {}
-    arguments = snapshot.get("arguments")
-    if isinstance(arguments, dict):
-        arguments = {key: arguments[key] for key in list(arguments)[:12]}
-    output = run.get("output") if isinstance(run.get("output"), (str, int, float, bool, type(None), dict, list)) else None
-    return {"run_id": run.get("run_id"), "status": run.get("status"), "created_at": run.get("created_at"),
-            "experiment_ref": run.get("experiment_ref"), "tool": snapshot.get("tool"),
-            "capability": run.get("capability", snapshot.get("capability")), "arguments": _brief(arguments),
-            "output": _brief(output), "temporal_status": run.get("temporal_status")}
+    return _run_ledger(run)
 
 
 def _markdown(record: dict[str, Any], source: str, source_hash: str) -> str:
@@ -439,7 +467,7 @@ def _markdown(record: dict[str, Any], source: str, source_hash: str) -> str:
             "date": record["provenance"].get("assessment_created_at", "unknown"), "attribution": "study_assessment",
             "sources": [{"uri": source, "locator": "$/" + record["assessment_ref"], "sha256": source_hash}],
             "conditions": record["context"], "relations": record.get("relations", []),
-            "experience_status": record["guidance"].get("status", "unverified"), "data_schema": SCHEMA}
+            "experience_status": record["guidance"].get("status", "unverified"), "data_schema": record["schema"]}
     compact = {"entities": [_compact_entity(item) for item in record["observations"].get("entities", [])],
                "missing_refs": record["observations"].get("missing_refs", []),
                "runs": [_compact_run(run) for run in record["actions"].get("runs", [])]}
@@ -483,6 +511,57 @@ def publish_iteration(knowledge_root: str | os.PathLike[str], record: dict[str, 
             "hash": source_hash}
 
 
+def existing_publication(knowledge_root: str | os.PathLike[str], study_id: str,
+                         assessment_ref: str) -> dict[str, Any] | None:
+    """Acknowledge an existing fixed publication without rebuilding its contents.
+
+    Missing derived Markdown and indexes are repaired from the fixed JSON.
+    Existing scientific JSON and Markdown are never overwritten.
+    """
+    _text(study_id, "study_id")
+    logical, version_text = _ref(assessment_ref, "assessment_ref").rsplit("@", 1)
+    ident = "experience-" + hashlib.sha256(f"{study_id}\0{logical}".encode()).hexdigest()[:24]
+    kb = experience_library(knowledge_root)
+    digest_key = hashlib.sha256(ident.encode()).hexdigest()[:24]
+    source = _safe_path(kb.root, kb.root / "iterations" / digest_key / f"v{int(version_text)}.json")
+    markdown = source.with_suffix(".md")
+    lock = KnowledgeBase(kb.cache_root / ".experience-publication")._lock()
+    with lock:
+        if not source.exists() and not markdown.exists():
+            return None
+        if not source.is_file():
+            raise ExperienceError("existing experience publication is incomplete")
+        raw = source.read_bytes()
+        try:
+            record = validate_iteration(json.loads(raw))
+        except (ValueError, UnicodeError) as exc:
+            raise ExperienceError("existing experience publication is invalid") from exc
+        if (record["id"] != ident or record["study_id"] != study_id or
+                record["assessment_ref"] != assessment_ref or record["version"] != int(version_text)):
+            raise ExperienceError("existing experience publication identity mismatch")
+        digest = hashlib.sha256(raw).hexdigest()
+        relative_source = source.relative_to(kb.root).as_posix()
+        if not markdown.exists():
+            _write_atomic(markdown, _markdown(record, relative_source, digest).encode("utf-8"))
+        try:
+            match = META_RE.search(markdown.read_text(encoding="utf-8"))
+            meta = json.loads(match.group(1)) if match else {}
+        except (ValueError, UnicodeError) as exc:
+            raise ExperienceError("existing experience publication is invalid") from exc
+        cited = (meta.get("sources") or [{}])[0]
+        if cited.get("sha256") != digest:
+            raise ExperienceError("existing experience source hash mismatch")
+        if (meta.get("id") != ident or str(meta.get("version")) != version_text or
+                meta.get("data_schema") != record["schema"] or cited.get("uri") != relative_source):
+            raise ExperienceError("existing experience Markdown identity/source mismatch")
+        try:
+            indexed = kb.register_many([markdown])[0]
+        except (KnowledgeError, OSError) as exc:
+            raise ExperienceError(f"experience saved but indexing is pending: {exc}") from exc
+    return {"id": ident, "version": record["version"], "path": str(markdown),
+            "snapshot_path": str(source), "indexed": bool(indexed.get("indexed")), "hash": digest}
+
+
 def experience_library(knowledge_root):
     kb = KnowledgeBase(knowledge_root)
     repository = Path(__file__).resolve().parent.parent
@@ -492,4 +571,5 @@ def experience_library(knowledge_root):
     return kb
 
 
-__all__ = ["SCHEMA", "ExperienceError", "build_iteration", "validate_iteration", "publish_iteration"]
+__all__ = ["SCHEMA", "SUPPORTED_SCHEMAS", "ExperienceError", "build_iteration",
+           "validate_iteration", "compact_iteration", "publish_iteration", "existing_publication"]

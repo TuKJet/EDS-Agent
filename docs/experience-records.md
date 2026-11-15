@@ -2,8 +2,9 @@
 
 项目目录保存研究原貌；个人数据根的 `knowledge/iterations/` 保存可复用的迭代经验投影。
 后续任务按当前问题检索经验，不需要逐个打开历史项目目录。项目里的 `study.json` 仍然是
-事实来源，中央记录携带固定版本、来源哈希和必要快照；删除或迁移项目副本后，中央记录
-仍可被读取并重建索引。
+事实来源。中央记录是实验摘要账本：携带固定版本、关键条件、方法、指标、判断和来源引用，
+不复制整份 Run 输入、工具响应或历史。删除或迁移项目副本后，中央记录仍可读懂并重建索引；
+能否重新执行实验，则取决于被引用的模型和必要原始证据是否仍然可用。
 
 ## 什么会进入中央库
 
@@ -54,7 +55,7 @@ python -m eds study D:/legacy/study experience-backfill --assessment assessment@
 `experience-backfill` 只读原 Study 并写中央库，不在旧 Study 添加 publication/outbox
 事件；适合一次性迁移，按 Study 与 Assessment 版本幂等。`experience-bind` 用于绑定未来
 迭代，`experience-publish` 用于重试已经跟踪的中央发布。原项目迁移后仍保留其事实记录，
-中央经验记录保存引用、哈希和必要快照。
+中央经验记录保存工程摘要、固定引用和来源哈希。
 
 发布按 `study_id + assessment 版本` 幂等；重复发布不会制造重复经验。原始 Study 引用、Run/证据
 引用、文件版本和哈希写入中央记录，不能把绝对路径当成可迁移文件。大型 CAD/CAE 文件仍需
@@ -93,6 +94,25 @@ python -m eds study D:/legacy/study experience-backfill --assessment assessment@
 }
 ```
 
-中央快照按 Assessment 创建时截断 Run 历史；创建时间、环境或版本缺失时明确写成
-`unknown`，不会把后来追加的状态倒灌进旧经验。不是每个 CLI 调用或每条聊天都自动生成
-LLM 归纳，只有形成实质认识变化的 Assessment 或方法评估才发布经验记录。
+中央账本按 Assessment 创建时解释 Run 状态；新观察同时使用实际观察时间与写入时间，
+后来补录的旧日期结果不会倒灌进旧评估。创建时间、环境或版本缺失时明确写成 `unknown`。
+不是每个 CLI 调用或每条聊天都自动生成 LLM 归纳，只有形成实质认识变化的 Assessment
+或方法评估才发布经验记录。
+
+## v2 摘要与旧记录兼容
+
+新发布使用 `eds-experience/v2`。结构化 JSON 和 Markdown 都围绕工程事实组织：
+
+- 条件、参数、指标、判断、适用范围、方法评价及证据的固定引用保留原值，不按字符串长度截断科学数据。
+- 完整 Assessment 只保存在 `observations.entities`；`analysis` 保留解释与下一步，不再重复存储同一份 Assessment payload。
+- `actions.runs` 只保留 Run 身份、实验/输入引用、截至评估时的状态、执行能力、时间及来源观察位置。
+- Run 的 `input_snapshot`、`arguments`、执行/传输代码、`output` 和 `history` 不进入中央记录。
+  必要的原始文件由项目证据区按保留策略保存，中央账本不承担完整技术调用归档。
+- Markdown 可为长的科学字段显示摘要，并指向同一条精简结构化记录；索引和图谱均可从这些记录重建。
+
+v1 记录仍可读取、校验和用于图谱。`compact_iteration` 只转换表示，不改变经验的科学
+`id/version`、结论、方法评价或证据。对已经发布的记录转换时，迁移者必须记录旧、新哈希映射，
+更新 Markdown 的来源哈希并重建索引，不能声称转换后字节仍与旧文件相同。
+常规重复发布不会替换固定版本；确认失败后的重试优先核验已有文件并补索引/确认。
+若中断发生在 JSON 已写、Markdown 尚未写时，重试从已验证的固定 JSON 补全 Markdown；
+不重新读取 Study 生成结论，也不覆盖已有但冲突的 Markdown。

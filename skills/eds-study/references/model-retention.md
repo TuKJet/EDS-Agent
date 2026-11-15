@@ -30,22 +30,28 @@ background janitor or a new automatic deletion capability in the record engine.
 ## Preserve history, remove redundant model binaries
 
 Preserve fixed experiment/input identities, hypotheses, parameter/material/solver
-settings, Run status (including failed/unknown), logs, quantitative metrics, quality
-checks, assessments, selected field evidence/media and scripts needed to interpret
+settings, Run status (including failed/unknown), necessary diagnostic evidence,
+quantitative metrics, quality checks, assessments, selected field evidence/media and scripts needed to interpret
 and reproduce the work. Keep graph node IDs, edges and their original meanings.
 Do not delete a Run, evidence node or graph relationship to hide a missing model.
 Retain a unique raw failure/field artifact when the preserved observations are not
 enough to support the recorded conclusion. A historical reference alone does not
 require retaining every superseded native model binary indefinitely.
 
-Before deletion, write a manifest outside the deletion set. For each file include
+These lifecycle records describe retained models and unique scientific evidence.
+Routine transfer copies, migration backups and cleanup reports are temporary;
+remove them after their purpose is verified unless continued recovery needs or
+the user require retention. Do not create a permanent manifest for every
+disposable file or copy the retained raw evidence into each lifecycle record.
+
+For model or unique-evidence deletion, write a manifest outside the deletion set. For each file include
 its absolute location, size/mtime, scheme and role, relevant fixed record/graph refs,
 reason and retained successor (if any). Include a known hash or verify one when
 claiming content equality or a recoverable backup. Record local/remote copies and
 dependencies explicitly. Do not silently relocate all intermediate models into a
 different backup/cache directory merely to satisfy cleanup.
 
-Append a lifecycle Evidence/decision linked to the affected records and manifest;
+For these lifecycle deletions, append Evidence/decision linked to the affected records and manifest;
 keep the historical records immutable. After execution, record per-file receipts,
 timestamp and availability: retained, removed, archived at a verified location, or
 deferred with a reason. These are manifest dispositions, not new Run statuses.

@@ -114,6 +114,10 @@ def parser():
     experience_backfill.add_argument("--assessment", help="Fixed assessment reference; omitted copies all")
     experience_backfill.add_argument("--knowledge-root", help="Default: managed or bound central knowledge root")
     actions.add_parser("experience-status", help="Show pending central experience publications")
+    compact = actions.add_parser("storage-compact", help="Replace legacy full snapshots with a small experiment ledger")
+    compact.add_argument("--knowledge-root", required=True)
+    compact.add_argument("--apply", action="store_true", help="Apply after verifying one compressed rollback archive; default previews only")
+    compact.add_argument("--backup", help="Archive path outside the Study and knowledge roots")
     kb = commands.add_parser("kb", help="Explicit Markdown knowledge registration and retrieval")
     kb.add_argument("root", help="Independent knowledge workspace or @knowledge")
     actions = kb.add_subparsers(dest="action", required=True)
@@ -281,6 +285,9 @@ def dispatch(args):
             return store.backfill_experiences(assessment_ref=args.assessment, knowledge_root=args.knowledge_root)
         if args.action == "experience-status":
             return store.experience_status()
+        if args.action == "storage-compact":
+            from .storage_migration import migrate_storage
+            return migrate_storage(args.root, args.knowledge_root, apply=args.apply, backup_path=args.backup)
     if args.command == "kb":
         if args.action == "route":
             return knowledge_route(question=args.question, stage=args.stage)

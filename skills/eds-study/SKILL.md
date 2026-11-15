@@ -19,6 +19,14 @@ For routine research, `study.json` is storage, not a reading entrypoint: opening
 it directly also bypasses the compact view. Fetch the needed record by its fixed
 ref or Run id; inspect the full file only for a specific data-repair/diagnostic need.
 
+Record experiments as a small ledger: fixed input/method versions, changed
+parameters, key results, quality checks, judgments and evidence locations. Keep
+necessary raw evidence once and reference its path/hash; do not embed full tool
+responses, scripts, matrices or time histories in entity payloads, summaries or
+central feedback. Publication retries retain identities and status, not copies
+of the Study or its Run history. See [knowledge routing](references/knowledge.md)
+when publishing or retrieving these records.
+
 ## Portable personal data root
 
 When a portable EDS root is configured, prefer `"@knowledge"`, `"@study/<name>"` and
@@ -52,12 +60,18 @@ until a VM fills up. This does not authorize deleting another task's files.
 
 Preserve Study/Run/Evidence/Assessment records, fixed input identities, metrics,
 validation, reproduction scripts, deliverables and graph nodes/edges. Removing a
-model file must not erase or rewrite the experiment history. Before deletion,
-record the exact paths, retained replacements, evidence refs and availability in
+model file must not erase or rewrite the experiment history. Before deleting a
+retained model or unique evidence, record the exact paths, retained replacements, evidence refs and availability in
 a lifecycle manifest; after deletion, append receipts and an explicit removed or
 archived disposition. A graph reference can survive a file's deletion but must
 not imply that the file is still loadable. Keep unique unresolved failure evidence
 until its required observations have been preserved or its retention is resolved.
+
+Disposable exports, transfer copies and cleanup reports need no permanent history
+of their own. After validating a storage cleanup, remove its temporary backups
+and migration reports unless the user or an unresolved recovery need requires
+retention. Measure total storage across JSON, Markdown, indexes and attachments;
+moving the same full content to another format or directory is not a reduction.
 
 Read [model retention](references/model-retention.md) when planning model-producing
 execution, reconciling storage or closing an experiment. It defines the disk budget,

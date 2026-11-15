@@ -1,4 +1,5 @@
 import contextlib
+import hashlib
 import io
 import json
 import sys
@@ -36,7 +37,8 @@ class McpStudyRecordingTests(unittest.TestCase):
         return StudyStore(self.root / "study").read()["runs"][-1]
 
     def run_main(self, output, response=None, error=None, binding=None, capability=None, tool="demo_tool",
-                 expected_server=None, experiment_ref="exp", input_refs=None, with_study=True):
+                 expected_server=None, experiment_ref="exp", input_refs=None, with_study=True,
+                 record_output=None):
         def inline_run(coro):
             try:
                 return coro.send(None)
@@ -50,6 +52,8 @@ class McpStudyRecordingTests(unittest.TestCase):
         stdout, stderr = io.StringIO(), io.StringIO()
         argv = ["mcp_call.py", "--url", "http://127.0.0.1:1/mcp", "--output", str(output),
                 "call", tool, "--data", str(self.data)]
+        if record_output is not None:
+            argv[argv.index("call"):argv.index("call")] = ["--record-output", record_output]
         if with_study:
             argv[argv.index("call"):argv.index("call")] = [
                 "--study-root", str(self.root / "study"), "--experiment-ref", experiment_ref]
@@ -81,6 +85,192 @@ class McpStudyRecordingTests(unittest.TestCase):
         self.assertNotIn("output_path", run["input_snapshot"])
         self.assertTrue(output.exists())
         self.assertIn(run["run_id"], stdout)
+
+    def test_default_recording_keeps_large_response_out_of_study(self):
+        response = {"result": {"structuredContent": {"payload": "LARGE_RAW" * 30000}}}
+        code, call, _, _ = self.run_main(self.root / "default.json", response=response)
+        self.assertEqual((code, call.await_count), (0, 1))
+        run = self.latest()
+        self.assertEqual(run["output"]["recording"], "artifact")
+        self.assertNotIn("LARGE_RAW", json.dumps(run))
+
+    def test_large_arguments_are_referenced_and_relocation_does_not_resubmit(self):
+        data = {"params": {"code": "LONG_SCRIPT" * 30000, "frequency": 0.5}}
+        self.data.write_text(json.dumps(data), encoding="utf-8")
+        code, call, _, _ = self.run_main(self.root / "first.json", error=TimeoutError("lost"))
+        self.assertEqual((code, call.await_count), (2, 1))
+        snapshot = self.latest()["input_snapshot"]
+        self.assertLess(len(json.dumps(snapshot)), 4096)
+        self.assertNotIn("LONG_SCRIPT", json.dumps(snapshot))
+        self.assertEqual(snapshot["argument_summary"]["params"]["frequency"], 0.5)
+        receipt = snapshot["arguments_source"]
+        self.assertEqual(receipt["sha256"], hashlib.sha256(self.data.read_bytes()).hexdigest())
+        self.data = self.root / "relocated.json"
+        self.data.write_text(json.dumps(data, indent=4), encoding="utf-8")
+        code, call, _, stderr = self.run_main(self.root / "second.json", response={"result": {}})
+        self.assertEqual((code, call.await_count), (2, 0))
+        self.assertIn("unknown", stderr)
+
+    def test_same_key_legacy_inline_record_matches_new_receipt_identity(self):
+        data = {"code": "historical-code" * 20000}
+        self.data.write_text(json.dumps(data), encoding="utf-8")
+        with patch.object(mcp_call, "_argument_record", return_value={"arguments": data}):
+            code, call, _, _ = self.run_main(self.root / "legacy.json", error=TimeoutError("lost"))
+        self.assertEqual((code, call.await_count), (2, 1))
+        code, call, _, stderr = self.run_main(self.root / "new.json", response={"result": {}})
+        self.assertEqual((code, call.await_count), (2, 0))
+        self.assertNotIn("different request", stderr)
+
+    def test_changed_argument_source_is_rejected_before_submission(self):
+        loaded = {"code": "loaded-code" * 20000}
+        self.data.write_text(json.dumps({"code": "replacement-code" * 20000}), encoding="utf-8")
+        with patch.object(mcp_call, "_call_data", return_value=loaded):
+            code, call, _, stderr = self.run_main(self.root / "changed.json", response={"result": {}})
+        self.assertEqual((code, call.await_count), (2, 0))
+        self.assertIn("changed after loading", stderr)
+        self.assertEqual(self.store.read()["runs"], [])
+
+    def test_large_legacy_inline_arguments_block_new_receipt_submission(self):
+        data = {"code": "legacy-script" * 20000}
+        self.data.write_text(json.dumps(data), encoding="utf-8")
+        run = self.store.add_run(experiment_ref="exp", input_refs=[], backend="mcp",
+            capability="demo_tool", idempotency_key="legacy-large-key",
+            input_snapshot={"tool": "demo_tool", "arguments": data,
+                "server_url": "http://127.0.0.1:1/mcp", "expected_server": None})
+        self.store.transition_run(run["run_id"], "submitting")
+        code, call, _, _ = self.run_main(self.root / "blocked.json", response={"result": {}})
+        self.assertEqual((code, call.await_count), (2, 0))
+
+    def test_artifact_response_is_saved_before_compact_run_receipt(self):
+        output = self.root / "large-response.json"
+        response = {"server_name": "test-server", "tool": "demo_tool", "tool_sent": True,
+                    "preflight_rejected": False, "result": {"isError": False,
+                    "structuredContent": {"status": "ok", "large_payload": "x" * 2_000_000}}}
+        transition = StudyStore.transition_run
+
+        def check_receipt(store, run_id, status, **kwargs):
+            if status == "completed":
+                self.assertEqual(json.loads(output.read_bytes()), response)
+                receipt = kwargs["output"]["result_artifact"]
+                self.assertEqual(receipt["sha256"], hashlib.sha256(output.read_bytes()).hexdigest())
+            return transition(store, run_id, status, **kwargs)
+
+        with patch.object(StudyStore, "transition_run", autospec=True, side_effect=check_receipt):
+            code, call, stdout, _ = self.run_main(output, response=response, record_output="artifact")
+        self.assertEqual((code, call.await_count), (0, 1))
+        run = self.latest()
+        receipt = run["output"]["result_artifact"]
+        self.assertEqual(receipt["uri"], str(output.resolve()))
+        self.assertEqual(receipt["bytes"], output.stat().st_size)
+        self.assertEqual(run["history"][-1]["output"], run["output"])
+        self.assertEqual(run["output"]["server_name"], "test-server")
+        self.assertNotIn("large_payload", json.dumps(self.store.read()))
+        self.assertLess(len(json.dumps(self.store.read())), 20_000)
+        self.assertEqual(json.loads(stdout)["record_output"], "artifact")
+
+    def test_artifact_recording_preserves_tool_and_operation_failures(self):
+        responses = {
+            "tool": {"isError": True},
+            "operation": {"isError": False, "structuredContent": {"status": "failed"}},
+            "text": {"isError": False, "content": [{"type": "text", "text": "# error\nfailed"}]},
+        }
+        for name, payload in responses.items():
+            with self.subTest(name=name):
+                self.data.write_text(json.dumps({"params": {"value": name}}))
+                output = self.root / (name + "-artifact.json")
+                response = {"tool_sent": True, "result": payload}
+                code, call, stdout, _ = self.run_main(output, response=response, record_output="artifact")
+                self.assertEqual((code, call.await_count, self.latest()["status"]), (2, 1, "failed"))
+                self.assertEqual(json.loads(output.read_bytes()), response)
+                expected_key = "tool_error" if name == "tool" else "operation_failed"
+                self.assertTrue(self.latest()["output"][expected_key])
+                self.assertTrue(json.loads(stdout)[expected_key])
+
+    def test_artifact_async_ack_preserves_submitted_task_identity(self):
+        response = {"tool_sent": True, "result": {"isError": False,
+                    "structuredContent": {"job": {"job_id": "artifact-job-1"}}}}
+        code, call, stdout, _ = self.run_main(
+            self.root / "async-artifact.json", response=response, record_output="artifact",
+            binding=self.async_binding(), capability="solve")
+        self.assertEqual((code, call.await_count), (0, 1))
+        self.assertEqual((self.latest()["status"], self.latest()["task_id"]), ("submitted", "artifact-job-1"))
+        self.assertTrue(json.loads(stdout)["requires_query"])
+
+    def test_artifact_preflight_receipt_allows_only_unsent_retry(self):
+        rejected = {"preflight_rejected": True, "preflight_error": "wrong_server", "tool_sent": False}
+        code, _, _, _ = self.run_main(self.root / "reject-artifact.json", response=rejected,
+                                      record_output="artifact")
+        self.assertEqual(code, 2)
+        old = self.latest()
+        self.assertTrue(old["output"]["preflight_rejected"])
+        self.assertFalse(old["output"]["tool_sent"])
+        self.assertEqual(old["output"]["preflight_error"], "wrong_server")
+        code, call, _, stderr = self.run_main(self.root / "repaired-inline.json",
+                                             response={"tool_sent": True, "result": {"ok": True}})
+        self.assertEqual((code, call.await_count, stderr), (0, 1, ""))
+        self.assertEqual(self.store.read()["runs"][0], old)
+
+    def test_changing_record_output_cannot_bypass_action_idempotency(self):
+        for first, second in (("inline", "artifact"), ("artifact", "inline")):
+            with self.subTest(first=first):
+                self.data.write_text(json.dumps({"params": {"value": first}}))
+                code, call, _, _ = self.run_main(self.root / (first + "-first.json"),
+                    response={"tool_sent": True, "result": {"ok": True}}, record_output=first)
+                self.assertEqual((code, call.await_count), (0, 1))
+                original = self.latest()
+                output = self.root / (first + "-repeat.json")
+                code, call, _, stderr = self.run_main(output,
+                    response={"result": {"ok": "must-not-run"}}, record_output=second)
+                self.assertEqual((code, call.await_count), (2, 0))
+                self.assertEqual(json.loads(stderr)["existing_run_id"], original["run_id"])
+                self.assertEqual(self.latest(), original)
+                self.assertFalse(output.exists())
+
+    def test_artifact_write_failure_records_unknown_with_known_async_task(self):
+        output = self.root / "artifact-write-fails.json"
+        response = {"tool_sent": True, "result": {"isError": False,
+                    "structuredContent": {"job": {"job_id": "received-job-1"}}}}
+        original_open = Path.open
+
+        def fail_artifact(path, *args, **kwargs):
+            if path == output:
+                raise OSError("artifact disk full")
+            return original_open(path, *args, **kwargs)
+
+        with patch.object(Path, "open", autospec=True, side_effect=fail_artifact):
+            code, call, _, stderr = self.run_main(output, response=response,
+                record_output="artifact", binding=self.async_binding(), capability="solve")
+        self.assertEqual((code, call.await_count), (2, 1))
+        self.assertEqual((self.latest()["status"], self.latest()["task_id"]), ("unknown", "received-job-1"))
+        failure = json.loads(stderr)
+        self.assertTrue(failure["protocol_completed"])
+        self.assertTrue(failure["tool_sent"])
+        self.assertFalse(failure["current_call_not_executed"])
+        self.assertTrue(failure["requires_query"])
+        self.assertFalse(output.exists())
+        code, call, _, _ = self.run_main(self.root / "write-failure-retry.json", response=response,
+            record_output="inline", binding=self.async_binding(), capability="solve")
+        self.assertEqual((code, call.await_count), (2, 0))
+
+    def test_artifact_never_overwrites_existing_or_racing_evidence(self):
+        output = self.root / "existing.json"
+        output.write_text("earlier evidence")
+        with self.assertRaises(SystemExit) as raised:
+            self.run_main(output, response={"result": {}}, record_output="artifact")
+        self.assertEqual(raised.exception.code, 2)
+        self.assertEqual(self.store.read()["runs"], [])
+        self.assertEqual(output.read_text(), "earlier evidence")
+
+        race = self.root / "racing.json"
+
+        async def invoke_with_race(args):
+            race.write_text("concurrent evidence")
+            return {"tool_sent": True, "result": {"ok": True}}
+
+        code, call, _, stderr = self.run_main(race, error=invoke_with_race, record_output="artifact")
+        self.assertEqual((code, call.await_count, self.latest()["status"]), (2, 1, "unknown"))
+        self.assertEqual(race.read_text(), "concurrent evidence")
+        self.assertEqual(json.loads(stderr)["error"], "FileExistsError")
 
     def test_completed_same_action_changed_output_is_rejected_without_call(self):
         first = self.root / "completed-first.json"
@@ -278,7 +468,8 @@ class McpStudyRecordingTests(unittest.TestCase):
                 self.assertEqual((code, call.await_count), (2, 1))
                 self.assertEqual(self.latest()["status"], "failed")
                 self.assertTrue(json.loads(stdout)["operation_failed"])
-                self.assertEqual(self.latest()["history"][-1]["output"]["result"], payload)
+                receipt = self.latest()["history"][-1]["output"]["result_artifact"]
+                self.assertEqual(json.loads(Path(receipt["uri"]).read_text())["result"], payload)
 
     def test_markdown_error_mentions_are_not_operation_failures(self):
         for text in ("# ok\n- **message**: no error", "# error handling\nDocumentation",
@@ -520,7 +711,7 @@ class McpStudyRecordingTests(unittest.TestCase):
                 raise OSError("evidence disk full")
             return original_write_text(path, data, *args, **kwargs)
         with patch.object(Path, "write_text", autospec=True, side_effect=fail_evidence):
-            code, call, _, stderr = self.run_main(output, response=response, binding=self.async_binding(), capability="solve")
+            code, call, _, stderr = self.run_main(output, response=response, binding=self.async_binding(), capability="solve", record_output="inline")
         self.assertEqual((code, call.await_count), (2, 1))
         run = self.latest()
         self.assertEqual((run["status"], run["task_id"], run["output"]), ("submitted", "durable-1", response))

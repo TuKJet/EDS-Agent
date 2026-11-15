@@ -56,5 +56,12 @@ MCP generator supports them. Keep the limitation visible before document mutatio
   only the requested status, actual-state differences, QoI and evidence paths to
   the Study owner.
 
+`scripts/mcp_call.py` records result-file receipts by default. Keep that default
+for ordinary execution; large arguments reference the existing argument file
+with a content hash. Return decision-relevant values and those file references
+to the owner instead of copying complete responses or transfer scripts into
+Study entities, Markdown feedback or additional report files. Read a referenced
+artifact only when its contents are needed for the current decision.
+
 If the target tool cannot be discovered or the schema does not match, stop the
 runtime route and switch to the matching branch in `execution-setup.md`.

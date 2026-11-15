@@ -63,6 +63,8 @@ ENTITY_RELATIONS.update({f"{kind}_refs": kind for kind in KINDS})
 ENTITY_RELATIONS.update({"refs": None, "input_refs": None, "candidate_refs": None})
 CONTEXT_FIELDS = {"goal", "mode", "constraints", "facts", "assumptions", "gaps", "assets"}
 METRIC_FIELDS = {"elapsed_seconds", "human_inputs", "model_cost"}
+ARTIFACT_SCHEMA = "eds-json-artifact/v1"
+INLINE_LIMIT = 16 * 1024
 
 
 def _now() -> str:
@@ -99,6 +101,26 @@ def _json_value(value: Any) -> None:
 def _canonical(value: Any) -> str:
     _json_value(value)
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def _argument_key(snapshot):
+    if 'arguments' in snapshot:
+        arguments = snapshot['arguments']
+        digest = (arguments['sha256'] if isinstance(arguments, dict) and arguments.get('schema') == ARTIFACT_SCHEMA
+                  else hashlib.sha256(_canonical(arguments).encode()).hexdigest())
+        if snapshot.get('arguments_sha256', digest) != digest:
+            raise StudyError('argument identity disagrees with recorded arguments')
+        return digest
+    return snapshot.get('arguments_sha256')
+
+
+def _input_identity(snapshot):
+    identity = {key: value for key, value in snapshot.items()
+                if key not in {'arguments', 'arguments_sha256', 'arguments_source', 'argument_summary'}}
+    digest = _argument_key(snapshot)
+    if digest is not None:
+        identity['arguments_sha256'] = digest
+    return identity
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -207,7 +229,11 @@ class StudyStore:
     def _write(self, state: dict[str, Any]) -> None:
         state["updated_at"] = _now()
         self._validate_state(state)
-        encoded = json.dumps(state, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n"
+        # The latest output is a convenience view, not a second stored result.
+        disk = {**state, "run_output_storage": "history",
+                "runs": [{key: value for key, value in run.items() if key != "output"}
+                         for run in state["runs"]]}
+        encoded = json.dumps(disk, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n"
         fd, temporary = tempfile.mkstemp(prefix="study.", suffix=".tmp", dir=self.root)
         try:
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
@@ -225,8 +251,81 @@ class StudyStore:
                                parse_constant=_reject_constant, object_pairs_hook=_unique_object)
         except (OSError, json.JSONDecodeError, UnicodeError) as exc:
             raise StudyError(f"cannot read study: {exc}") from exc
+        if isinstance(state, dict) and state.get("run_output_storage") == "history":
+            for run in state.get("runs", []):
+                if "output" in run:
+                    raise StudyError("history-only storage cannot contain a duplicate current output")
+                run["output"] = next((item.get("output") for item in reversed(run.get("history", []))
+                                      if item.get("output") is not None), None)
         self._validate_state(state)
         return state
+
+    def _store_payload(self, value, *, write=True):
+        """Keep large necessary evidence once; never hydrate it during list/read."""
+        if isinstance(value, dict) and value.get("schema") == ARTIFACT_SCHEMA:
+            return value
+        encoded = _canonical(value).encode("utf-8")
+        if len(encoded) <= INLINE_LIMIT:
+            return value
+        digest = hashlib.sha256(encoded).hexdigest()
+        receipt = {"schema": ARTIFACT_SCHEMA, "uri": f"artifacts/{digest}.json",
+                   "sha256": digest, "bytes": len(encoded)}
+        if write:
+            path = self.root / receipt["uri"]
+            if not path.resolve().is_relative_to(self.root / "artifacts"):
+                raise StudyError("result artifact escapes its evidence directory")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.exists():
+                if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+                    raise StudyError("existing result artifact has changed")
+            else:
+                fd, temporary = tempfile.mkstemp(prefix="artifact.", dir=path.parent)
+                try:
+                    with os.fdopen(fd, "wb") as stream:
+                        stream.write(encoded)
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    os.replace(temporary, path)
+                finally:
+                    Path(temporary).unlink(missing_ok=True)
+        return receipt
+
+    def read_artifact(self, receipt):
+        if not isinstance(receipt, dict) or receipt.get("schema") != ARTIFACT_SCHEMA:
+            raise StudyError("expected a Study result artifact receipt")
+        uri = receipt.get("uri")
+        if not isinstance(uri, str) or Path(uri).is_absolute():
+            raise StudyError("result artifact must use a relative path")
+        path = (self.root / uri).resolve()
+        if not path.is_relative_to(self.root / "artifacts"):
+            raise StudyError("result artifact escapes its evidence directory")
+        try:
+            raw = path.read_bytes()
+            if len(raw) != receipt.get("bytes") or hashlib.sha256(raw).hexdigest() != receipt.get("sha256"):
+                raise StudyError("result artifact hash or size mismatch")
+            return json.loads(raw, parse_constant=_reject_constant, object_pairs_hook=_unique_object)
+        except (OSError, ValueError) as exc:
+            raise StudyError(f"cannot read result artifact: {exc}") from exc
+
+    def compact_storage(self, state, *, write_artifacts=False):
+        """Explicit migration transform, in place; dry-run performs no writes."""
+        receipts = {}
+        for run in state["runs"]:
+            snapshot = run["input_snapshot"]
+            if "arguments" in snapshot:
+                arguments = snapshot["arguments"]
+                if not (isinstance(arguments, dict) and arguments.get("schema") == ARTIFACT_SCHEMA):
+                    snapshot["arguments_sha256"] = hashlib.sha256(_canonical(arguments).encode()).hexdigest()
+                snapshot["arguments"] = self._store_payload(arguments, write=write_artifacts)
+                if isinstance(snapshot["arguments"], dict) and snapshot["arguments"].get("schema") == ARTIFACT_SCHEMA:
+                    receipts[snapshot["arguments"]["uri"]] = snapshot["arguments"]
+            for observation in run["history"]:
+                observation["output"] = self._store_payload(observation["output"], write=write_artifacts)
+                output = observation["output"]
+                if isinstance(output, dict) and output.get("schema") == ARTIFACT_SCHEMA:
+                    receipts[output["uri"]] = output
+            run["output"] = next((o["output"] for o in reversed(run["history"]) if o["output"] is not None), None)
+        return {"artifacts": list(receipts.values()), "artifact_bytes": sum(r["bytes"] for r in receipts.values())}
 
     @staticmethod
     def _split_ref(ref: str) -> tuple[str, int | None]:
@@ -451,8 +550,10 @@ class StudyStore:
                     raise StudyError("experience publication requires a fixed assessment")
                 if event.get("status") not in {"pending", "failed", "published"}:
                     raise StudyError("invalid experience publication status")
-                if event["status"] == "pending" and not isinstance(event.get("record"), dict):
-                    raise StudyError("pending experience publication requires its frozen record")
+                # v1 queues carried a full record. New queues reference the
+                # immutable Assessment; no second scientific database lives here.
+                if "record" in event and not isinstance(event["record"], dict):
+                    raise StudyError("legacy experience record must be an object")
 
     @staticmethod
     def _validate_history(run: dict[str, Any]) -> None:
@@ -475,6 +576,8 @@ class StudyStore:
             elif not _allowed_transition(previous, status):
                 raise StudyError("invalid transition in stored run history")
             _timestamp(observation.get("at"), "run observation timestamp")
+            if 'recorded_at' in observation:
+                _timestamp(observation['recorded_at'], 'run receipt timestamp')
             if "task_id" not in observation or "output" not in observation:
                 raise StudyError("each observation must preserve task_id and raw output")
             task_id = observation["task_id"]
@@ -541,7 +644,7 @@ class StudyStore:
                 result = self.publish_experiences(assessment_ref=entity["ref"], knowledge_root=target)
                 pending = bool(result["pending_count"])
             except (OSError, ValueError, sqlite3.Error):
-                # The assessment and frozen pending record were committed first.
+                # The assessment and publication identity were committed first.
                 # A failed acknowledgement must not suggest repeating a CAD/CAE action.
                 pending = True
             if pending:
@@ -574,11 +677,21 @@ class StudyStore:
                 latest[event["publication_id"]] = event
         return latest
 
-    @classmethod
-    def _publication_summary(cls, state):
-        latest = cls._publication_states(state)
-        pending = [event for event in latest.values() if event["status"] != "published"]
-        return {"published_count": len(latest) - len(pending), "pending_count": len(pending),
+    def _publication_destination(self, target):
+        return str(Path(self._experience_root(target)).resolve())
+
+    def _publication_summary(self, state):
+        latest = self._publication_states(state)
+        # Old aliases remain audit events, not extra experiments or failed work
+        # when the same fixed assessment is already published to this library.
+        groups = {}
+        for event in latest.values():
+            key = (event['assessment_ref'], self._publication_destination(event['knowledge_root']))
+            if key not in groups or event['status'] == 'published' or groups[key]['status'] != 'published':
+                groups[key] = event
+        pending = [event for event in groups.values() if event["status"] != "published"]
+        return {"published_count": len(groups) - len(pending), "pending_count": len(pending),
+                "duplicate_publication_attempts": len(latest) - len(groups),
                 "pending": [{key: event.get(key) for key in ("assessment_ref", "status", "error")}
                             for event in pending[:10]]}
 
@@ -593,33 +706,26 @@ class StudyStore:
         self.update_context(experience_knowledge=knowledge_root)
         return self.experience_status()
 
-    @staticmethod
-    def _queue_experience(state, assessment_ref, target):
-        from .experience import build_iteration
-        key = hashlib.sha256(_canonical([state["study_id"], assessment_ref, target]).encode()).hexdigest()
-        existing = next((event for event in state["events"] if event["type"] == "experience_publication"
-                         and event["publication_id"] == key and event["status"] == "pending"), None)
-        if existing is not None:
-            return existing
-        try:
-            record = build_iteration(state, assessment_ref)
-        except (ValueError, TypeError, KeyError) as exc:
-            # Optional experience formatting cannot discard an engineering assessment.
-            latest = StudyStore._publication_states(state).get(key)
-            if latest and latest.get("build_error") == str(exc):
-                return latest
-            assessment = next(item for item in state["entities"] if item["ref"] == assessment_ref)
-            return StudyStore._event(state, "experience_publication", publication_id=key,
-                                     assessment_ref=assessment_ref, knowledge_root=target, status="failed",
-                                     error="Experience materialization failed: " + str(exc), build_error=str(exc),
-                                     assessment_snapshot=assessment)
-        return StudyStore._event(state, "experience_publication", publication_id=key,
-                                 assessment_ref=assessment_ref, knowledge_root=target, status="pending",
-                                 record=record)
+    def _queue_experience(self, state, assessment_ref, target):
+        destination = self._publication_destination(target)
+        matches = [event for event in state['events'] if event['type'] == 'experience_publication'
+                   and event['assessment_ref'] == assessment_ref
+                   and self._publication_destination(event['knowledge_root']) == destination]
+        published = next((event for event in reversed(matches) if event['status'] == 'published'), None)
+        if published is not None:
+            return published
+        pending = next((event for event in matches if event['status'] == 'pending'), None)
+        if pending is not None:
+            return pending
+        key = hashlib.sha256(_canonical([state['study_id'], assessment_ref, destination]).encode()).hexdigest()
+        # Preserve portable managed-root semantics; normalize ordinary paths.
+        stored_target = target if target == '@managed' else destination
+        return self._event(state, 'experience_publication', publication_id=key,
+                           assessment_ref=assessment_ref, knowledge_root=stored_target, status='pending')
 
     def publish_experiences(self, *, assessment_ref=None, knowledge_root=None):
-        """Publish frozen iteration records; a failure never rewinds an executed Run."""
-        from .experience import publish_iteration
+        """Publish a small scientific ledger; queues retain identities, not copies."""
+        from .experience import build_iteration, compact_iteration, existing_publication, publish_iteration
         with self._lock():
             state = self._read()
             target = knowledge_root or self._experience_target(state) or "@knowledge"
@@ -633,18 +739,23 @@ class StudyStore:
         results = []
         for pending in queued:
             key = pending["publication_id"]
-            if "record" not in pending:
-                results.append({"status": "failed", "error": pending["error"]})
-                continue
             if latest[key]["status"] == "published":
                 results.append(copy.deepcopy(latest[key].get("result", {})))
                 continue
             try:
-                result = publish_iteration(self._experience_root(target), pending["record"])
+                root = self._experience_root(pending['knowledge_root'])
+                result = existing_publication(root, state['study_id'], pending['assessment_ref'])
+                if result is None:
+                    # Legacy queues can be retried without expanding their full
+                    # snapshot into yet another record. New queues derive the
+                    # ledger from immutable refs and recorded-at observations.
+                    record = (compact_iteration(pending['record']) if 'record' in pending else
+                              build_iteration(state, pending['assessment_ref']))
+                    result = publish_iteration(root, record)
                 if not result.get("indexed"):
                     raise StudyError("central source saved but index is incomplete")
                 outcome = {"status": "published", "result": result}
-            except (OSError, ValueError, sqlite3.Error) as exc:
+            except (OSError, ValueError, TypeError, KeyError, sqlite3.Error) as exc:
                 outcome = {"status": "failed", "error": str(exc)}
             with self._lock():
                 state = self._read()
@@ -654,14 +765,14 @@ class StudyStore:
                                     and outcome["status"] == "failed" and current.get("error") == outcome["error"])
                 if (current is None or current["status"] != "published") and not repeated_failure:
                     self._event(state, "experience_publication", publication_id=key,
-                                assessment_ref=pending["assessment_ref"], knowledge_root=target, **outcome)
+                                assessment_ref=pending["assessment_ref"], knowledge_root=pending["knowledge_root"], **outcome)
                     self._write(state)
                 results.append(copy.deepcopy(self._publication_states(state)[key].get("result", outcome)))
         return {"results": results, **self._publication_summary(self._read())}
 
     def backfill_experiences(self, *, assessment_ref=None, knowledge_root=None):
         """Publish historical assessments without adding an outbox to the source Study."""
-        from .experience import build_iteration, experience_library, publish_iteration
+        from .experience import build_iteration, compact_iteration, existing_publication, experience_library, publish_iteration
         state = self._read()
         target = knowledge_root or self._experience_target(state) or "@knowledge"
         root = experience_library(self._experience_root(target)).root
@@ -669,14 +780,16 @@ class StudyStore:
                     [entity for entity in state["entities"] if entity["kind"] == "assessment"])
         # Honor an existing outbox snapshot if publication previously failed.
         frozen = {event["assessment_ref"]: event["record"] for event in state["events"]
-                  if event["type"] == "experience_publication" and event.get("status") == "pending"}
+                  if event["type"] == "experience_publication" and event.get("status") == "pending"
+                  and "record" in event}
         results = []
         for assessment in selected:
             try:
-                record = frozen.get(assessment["ref"])
-                if record is None:
-                    record = build_iteration(state, assessment["ref"])
-                result = publish_iteration(root, record)
+                result = existing_publication(root, state['study_id'], assessment['ref'])
+                if result is None:
+                    record = frozen.get(assessment["ref"])
+                    record = compact_iteration(record) if record is not None else build_iteration(state, assessment['ref'])
+                    result = publish_iteration(root, record)
                 if not result.get("indexed"):
                     raise StudyError("central source saved but index is incomplete")
                 results.append({"assessment_ref": assessment["ref"], "status": "published", **result})
@@ -711,7 +824,10 @@ class StudyStore:
                        "initial_task_id": task_id}
             old = next((run for run in state["runs"] if run["idempotency_key"] == idempotency_key), None)
             if old is not None:
-                if _canonical({key: old[key] for key in request}) != _canonical(request):
+                old_request = {key: old[key] for key in request}
+                old_request['input_snapshot'] = _input_identity(old_request['input_snapshot'])
+                current_request = {**request, 'input_snapshot': _input_identity(input_snapshot)}
+                if _canonical(old_request) != _canonical(current_request):
                     raise StudyError("idempotency key reused with a different request")
                 return copy.deepcopy(old)
             experiment = self._resolve(state, experiment_ref, "experiment")
@@ -750,13 +866,14 @@ class StudyStore:
             }
             prior_observation_refs_all = set()
             matching_terminal = False
-            for prior in state["runs"] if isinstance(snapshot_tool, str) and "arguments" in input_snapshot else ():
+            arguments_key = _argument_key(input_snapshot)
+            for prior in state["runs"] if isinstance(snapshot_tool, str) and arguments_key is not None else ():
                 prior_snapshot = prior.get("input_snapshot", {})
                 prior_server = prior_snapshot.get("expected_server") or prior_snapshot.get("server_url")
                 if (prior.get("experiment_ref") != experiment["ref"] or
                         prior_snapshot.get("tool") != snapshot_tool or
                         prior_server != current_server or
-                        prior_snapshot.get("arguments") != input_snapshot.get("arguments") or
+                        _argument_key(prior_snapshot) != arguments_key or
                         prior.get("idempotency_key") == idempotency_key or
                         prior.get("status") == "cancelled" and
                         not any(item.get("status") == "submitting" for item in prior.get("history", []))):
@@ -780,7 +897,7 @@ class StudyStore:
             initial_status = "unknown" if task_id is not None else "planned"
             run = {**request, "run_id": _uid("run"), "idempotency_key": idempotency_key, "task_id": task_id,
                    "status": initial_status, "output": None, "created_at": now, "updated_at": now,
-                   "history": [{"status": initial_status, "at": now, "task_id": task_id, "output": None}]}
+                   "history": [{"status": initial_status, "at": now, "recorded_at": now, "task_id": task_id, "output": None}]}
             state["runs"].append(run)
             self._write(state)
             return copy.deepcopy(run)
@@ -804,7 +921,9 @@ class StudyStore:
                 raise StudyError("completed run requires actual output")
             if task_id is not None:
                 run["task_id"] = task_id
-            run["history"].append({"status": status, "at": at, "task_id": run["task_id"], "output": copy.deepcopy(output)})
+            output = self._store_payload(output)
+            run["history"].append({"status": status, "at": at, "recorded_at": _now(),
+                                   "task_id": run["task_id"], "output": copy.deepcopy(output)})
             run["status"] = status
             run["updated_at"] = at
             if output is not None:

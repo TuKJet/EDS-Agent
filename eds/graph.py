@@ -15,7 +15,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
-from .experience import ExperienceError, validate_iteration
+from .experience import ExperienceError, SUPPORTED_SCHEMAS, validate_iteration
 from .knowledge import KnowledgeBase, KnowledgeError, knowledge_route
 
 try:  # Optional by design: normal knowledge operation does not need it.
@@ -109,7 +109,7 @@ class KnowledgeGraph:
         experience_sources = []
         for doc in docs.values():
             meta = doc["metadata"]
-            if meta["type"] == "preference" or meta.get("data_schema") != "eds-experience/v1":
+            if meta["type"] == "preference" or meta.get("data_schema") not in SUPPORTED_SCHEMAS:
                 continue
             source = (meta.get("sources") or [{}])[0]
             uri = source.get("uri")
@@ -133,7 +133,7 @@ class KnowledgeGraph:
 
     def _experience(self, doc: dict[str, Any]) -> dict[str, Any] | None:
         meta = doc["metadata"]
-        if meta.get("data_schema") != "eds-experience/v1":
+        if meta.get("data_schema") not in SUPPORTED_SCHEMAS:
             return None
         sources = meta.get("sources") or []
         source = sources[0] if sources else {}
@@ -160,6 +160,8 @@ class KnowledgeGraph:
             raise GraphError(f"invalid experience source {uri}: {exc}") from exc
         if str(record.get("id")) != str(meta["id"]) or str(record.get("version")) != str(meta["version"]):
             raise GraphError(f"experience source identity mismatch: {uri}")
+        if record["schema"] != meta["data_schema"]:
+            raise GraphError(f"experience source schema mismatch: {uri}")
         return {"record": record, "uri": uri, "sha256": digest, "stat": stat}
 
     @staticmethod

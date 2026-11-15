@@ -153,3 +153,13 @@ Only when managing/applying personal or team conventions, read
 Evidence/Assessment records remain mandatory regardless of optional extraction.
 Every material iteration is also retained in central feedback; extraction
 settings only control additional high-level curation.
+
+Central feedback v2 preserves scientific conditions, parameter changes, key
+metrics, judgments, limitations and fixed evidence references. Its Run entries
+contain identities and the status at assessment time, not full inputs, outputs
+or histories. Markdown is a searchable projection of that compact record, not
+another raw-data store. Put large traces, matrices, logs and scripts in selected
+evidence files and reference them; do not place them in Evidence observations
+or Experiment conditions merely to bypass the Run boundary.
+Use the bound library and `experience-publish` for retries; equivalent path aliases
+identify the same destination. Do not manually recreate publication snapshots.
